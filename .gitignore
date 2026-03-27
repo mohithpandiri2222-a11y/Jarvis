@@ -1,0 +1,45 @@
+# ============================================================
+# JARVIS — Git Ignore Rules
+# ============================================================
+
+# Environment & secrets
+.env
+.env.local
+.env.production
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+Lib/
+Scripts/
+Include/
+
+# Audio files (generated at runtime)
+audio/*.mp3
+audio/*.wav
+temp_response.mp3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini

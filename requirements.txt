@@ -1,0 +1,18 @@
+# ============================================================
+# JARVIS — Python Dependencies
+# ============================================================
+# Install with: pip install -r requirements.txt
+#
+# NOTE for Windows users:
+#   If pyaudio fails to install, run these commands instead:
+#     pip install pipwin
+#     pipwin install pyaudio
+# ============================================================
+
+openai>=1.0.0          # GPT-4o API client
+SpeechRecognition      # Microphone input and Google STT
+PyAudio                # Required by SpeechRecognition for mic access
+requests               # HTTP calls to Murf Falcon API
+pygame-ce              # Audio playback of MP3 files (community edition, better compat)
+python-dotenv          # Load .env API keys
+pyttsx3                # Fallback TTS if Murf fails (offline, free)
