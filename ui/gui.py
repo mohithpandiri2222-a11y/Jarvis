@@ -297,10 +297,16 @@ class JarvisGUI:
         )
         self._mute_btn.pack(side=tk.LEFT, padx=20, pady=8)
 
-        # Info label
+        # Info label — show active provider dynamically
+        try:
+            from config import LLM_PROVIDER, PROVIDER_NAMES
+            provider_name = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER)
+        except Exception:
+            provider_name = "LLM"
+
         tk.Label(
             footer,
-            text='Say "exit" or "goodbye" to stop  |  Voice: Murf Falcon TTS + GPT-4o',
+            text=f'Say "exit" or "goodbye" to stop  |  {provider_name} + Murf Falcon TTS',
             font=self._font_label,
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_panel"],

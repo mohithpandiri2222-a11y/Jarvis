@@ -10,6 +10,8 @@
 # ============================================================
 
 openai>=1.0.0          # GPT-4o API client
+anthropic>=0.30.0      # Claude API client
+google-genai>=1.0.0    # Gemini API client
 SpeechRecognition      # Microphone input and Google STT
 PyAudio                # Required by SpeechRecognition for mic access
 requests               # HTTP calls to Murf Falcon API

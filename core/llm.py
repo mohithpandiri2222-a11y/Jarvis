@@ -1,7 +1,8 @@
 # ============================================================
 # JARVIS — LLM Module (core/llm.py)
 # ============================================================
-# Handles GPT-4o API calls with the JARVIS system prompt,
+# Multi-provider LLM module supporting OpenAI, Claude, and Gemini.
+# Handles API calls with the JARVIS system prompt,
 # context injection (schedule + reminders), action tag parsing,
 # and conversation history management.
 # ============================================================
@@ -11,26 +12,62 @@ import re
 import webbrowser
 from datetime import datetime
 
-from openai import OpenAI
-
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import (
+    LLM_PROVIDER,
+    LLM_MODEL,
     OPENAI_API_KEY,
-    OPENAI_MODEL,
+    ANTHROPIC_API_KEY,
+    GEMINI_API_KEY,
     OPENAI_MAX_TOKENS,
     OPENAI_TEMPERATURE,
     MAX_CONVERSATION_HISTORY,
+    PROVIDER_NAMES,
 )
 from data.schedule import get_schedule, add_event, remove_event
 from data.reminders import get_reminders, add_reminder, delete_reminder
 
-# ── OpenAI Client ────────────────────────────────────────────
-_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ── The JARVIS System Prompt (from claude.md — Part 2) ───────
+# ── Provider Clients (lazy-initialized) ──────────────────────
+_openai_client = None
+_anthropic_client = None
+_gemini_client = None
+
+
+def _get_openai_client():
+    """Lazy-init OpenAI client."""
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        from config import OPENAI_API_KEY as key
+        _openai_client = OpenAI(api_key=key)
+    return _openai_client
+
+
+def _get_anthropic_client():
+    """Lazy-init Anthropic client."""
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        from config import ANTHROPIC_API_KEY as key
+        _anthropic_client = anthropic.Anthropic(api_key=key)
+    return _anthropic_client
+
+
+def _get_gemini_client():
+    """Lazy-init Google Gemini client."""
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        from config import GEMINI_API_KEY as key
+        _gemini_client = genai.Client(api_key=key)
+    return _gemini_client
+
+
+# ── The JARVIS System Prompt ─────────────────────────────────
 SYSTEM_PROMPT = r"""You are JARVIS — an intelligent, voice-first personal AI assistant running as a desktop application on the user's computer. You are modelled after the AI from the Iron Man films: calm, precise, slightly dry in humour, deeply loyal to your user, and always one step ahead. You call the user "Bro" — never their name unless they tell you it. You are not a chatbot. You are a personal agent.
 
 YOUR IDENTITY
@@ -200,9 +237,105 @@ def _trim_history(history: list) -> list:
     return history
 
 
+# ═══════════════════════════════════════════════════════════════
+# PROVIDER-SPECIFIC CALL FUNCTIONS
+# ═══════════════════════════════════════════════════════════════
+
+def _call_openai(messages: list) -> str:
+    """Call OpenAI API and return the response text."""
+    client = _get_openai_client()
+    print("🤖 Calling OpenAI GPT-4o...")
+    response = client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=messages,
+        max_tokens=OPENAI_MAX_TOKENS,
+        temperature=OPENAI_TEMPERATURE,
+    )
+    return response.choices[0].message.content
+
+
+def _call_claude(messages: list) -> str:
+    """
+    Call Anthropic Claude API and return the response text.
+    Claude uses a separate 'system' param instead of a system message in the list.
+    """
+    client = _get_anthropic_client()
+    print("🤖 Calling Anthropic Claude...")
+
+    # Extract system prompt and conversation messages
+    system_text = ""
+    conversation = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text = msg["content"]
+        else:
+            conversation.append(msg)
+
+    response = client.messages.create(
+        model=LLM_MODEL,
+        max_tokens=OPENAI_MAX_TOKENS,
+        system=system_text,
+        messages=conversation,
+    )
+    return response.content[0].text
+
+
+def _call_gemini(messages: list) -> str:
+    """
+    Call Google Gemini API and return the response text.
+    Converts the OpenAI-style messages into Gemini's format.
+    """
+    client = _get_gemini_client()
+    print("🤖 Calling Google Gemini...")
+
+    # Extract system instruction and conversation
+    system_text = ""
+    conversation_parts = []
+    for msg in messages:
+        if msg["role"] == "system":
+            system_text = msg["content"]
+        elif msg["role"] == "user":
+            conversation_parts.append({
+                "role": "user",
+                "parts": [{"text": msg["content"]}],
+            })
+        elif msg["role"] == "assistant":
+            conversation_parts.append({
+                "role": "model",
+                "parts": [{"text": msg["content"]}],
+            })
+
+    # Build config with system instruction
+    from google.genai import types
+    config = types.GenerateContentConfig(
+        system_instruction=system_text,
+        max_output_tokens=OPENAI_MAX_TOKENS,
+        temperature=OPENAI_TEMPERATURE,
+    )
+
+    response = client.models.generate_content(
+        model=LLM_MODEL,
+        contents=conversation_parts,
+        config=config,
+    )
+    return response.text
+
+
+# Provider dispatch map
+_PROVIDER_FUNCTIONS = {
+    "openai": _call_openai,
+    "claude": _call_claude,
+    "gemini": _call_gemini,
+}
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN PUBLIC FUNCTION
+# ═══════════════════════════════════════════════════════════════
+
 def get_response(user_text: str, history: list, status_callback=None) -> tuple:
     """
-    Sends user text to GPT-4o with context and returns the response.
+    Sends user text to the configured LLM provider and returns the response.
 
     Args:
         user_text: The transcribed text from the user.
@@ -233,15 +366,19 @@ def get_response(user_text: str, history: list, status_callback=None) -> tuple:
     ]
 
     try:
-        print("🤖 Calling GPT-4o...")
-        response = _client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            max_tokens=OPENAI_MAX_TOKENS,
-            temperature=OPENAI_TEMPERATURE,
-        )
+        # Import current provider at call-time (supports runtime switching)
+        from config import LLM_PROVIDER as current_provider
 
-        raw_response = response.choices[0].message.content
+        provider_name = PROVIDER_NAMES.get(current_provider, current_provider)
+        call_fn = _PROVIDER_FUNCTIONS.get(current_provider)
+
+        if not call_fn:
+            raise ValueError(
+                f"Unknown LLM provider: '{current_provider}'. "
+                f"Supported: openai, claude, gemini"
+            )
+
+        raw_response = call_fn(messages)
         print(f"💬 Jarvis (raw): {raw_response}")
 
         # Process action tags and get clean text for TTS
@@ -255,7 +392,7 @@ def get_response(user_text: str, history: list, status_callback=None) -> tuple:
 
     except Exception as e:
         error_msg = f"I'm having trouble connecting to my brain right now, Bro. Error: {str(e)}"
-        print(f"⚠  OpenAI API Error: {e}")
+        print(f"⚠  LLM API Error: {e}")
 
         # Still add to history so the conversation doesn't break
         history.append({"role": "assistant", "content": error_msg})
@@ -269,7 +406,8 @@ if __name__ == "__main__":
     print("=" * 50)
     print("  JARVIS LLM — Quick Test")
     print("=" * 50)
-    print(f"  Model     : {OPENAI_MODEL}")
+    print(f"  Provider  : {LLM_PROVIDER}")
+    print(f"  Model     : {LLM_MODEL}")
     print(f"  Max Tokens: {OPENAI_MAX_TOKENS}")
     print(f"  Temp      : {OPENAI_TEMPERATURE}")
     print(f"  History   : {MAX_CONVERSATION_HISTORY} messages max")

@@ -5,11 +5,12 @@
 #   J.A.R.V.I.S.
 #   Just A Rather Very Intelligent System
 #   Voice-First AI Desktop Assistant
-#   Powered by GPT-4o + Murf Falcon TTS
+#   Multi-Provider: OpenAI GPT-4o | Claude | Gemini
 #
 # Usage:
 #   python main.py            Launch with GUI
 #   python main.py --no-gui   Terminal-only mode
+#   python main.py --setup    Re-run provider setup dialog
 #   python main.py --test     Run module tests
 #
 # ============================================================
@@ -37,11 +38,43 @@ def _print_banner():
     |       Just A Rather Very Intelligent System               |
     |       Voice-First AI Desktop Assistant                    |
     |                                                           |
-    |       GPT-4o  |  Murf Falcon TTS  |  Python               |
-    |                                                           |
     +===========================================================+
     """
     print(banner)
+
+
+def _show_provider_info():
+    """Shows which LLM provider is active."""
+    from config import LLM_PROVIDER, LLM_MODEL, PROVIDER_NAMES
+    provider_name = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER)
+    print(f"    Provider : {provider_name}")
+    print(f"    Model    : {LLM_MODEL}")
+    print()
+
+
+def _run_setup_dialog() -> bool:
+    """
+    Shows the setup dialog and returns True if setup was completed.
+    Returns False if the user cancelled.
+    """
+    print("[JARVIS] Opening setup dialog...")
+    print("[JARVIS] Please select your AI provider and enter your API key.\n")
+    try:
+        from ui.setup_dialog import SetupDialog
+        dialog = SetupDialog()
+        result = dialog.run()
+
+        if result:
+            provider = result["provider"]
+            print(f"[JARVIS] Setup complete! Provider: {provider}")
+            return True
+        else:
+            print("[JARVIS] Setup cancelled by user.")
+            return False
+    except Exception as e:
+        print(f"[JARVIS] Setup dialog error: {e}")
+        print("[JARVIS] You can manually edit the .env file instead.")
+        return False
 
 
 def _run_tests():
@@ -56,8 +89,8 @@ def _run_tests():
     # Test 1: Config
     tests_total += 1
     try:
-        from config import validate_config, OPENAI_API_KEY, MURF_API_KEY
-        print("  [PASS] config.py loaded successfully")
+        from config import validate_config, LLM_PROVIDER, has_valid_llm_key
+        print(f"  [PASS] config.py loaded (provider: {LLM_PROVIDER})")
         tests_passed += 1
     except Exception as e:
         print(f"  [FAIL] config.py failed: {e}")
@@ -119,7 +152,16 @@ def _run_tests():
     except Exception as e:
         print(f"  [FAIL] ui/gui.py failed: {e}")
 
-    # Test 8: Microphone check
+    # Test 8: Setup dialog module
+    tests_total += 1
+    try:
+        from ui.setup_dialog import SetupDialog
+        print("  [PASS] ui/setup_dialog.py loaded successfully")
+        tests_passed += 1
+    except Exception as e:
+        print(f"  [FAIL] ui/setup_dialog.py failed: {e}")
+
+    # Test 9: Microphone check
     tests_total += 1
     try:
         from core.stt import test_microphone
@@ -153,6 +195,7 @@ def main():
 Examples:
   python main.py              Launch with GUI
   python main.py --no-gui     Terminal-only mode
+  python main.py --setup      Re-run provider setup dialog
   python main.py --test       Run module tests
         """,
     )
@@ -163,6 +206,10 @@ Examples:
     parser.add_argument(
         "--test", action="store_true",
         help="Run module tests and exit"
+    )
+    parser.add_argument(
+        "--setup", action="store_true",
+        help="Re-run the provider setup dialog to change API keys"
     )
 
     args = parser.parse_args()
@@ -175,15 +222,30 @@ Examples:
         success = _run_tests()
         sys.exit(0 if success else 1)
 
+    # -- Setup mode (forced re-setup) ------------------------------
+    if args.setup:
+        if not _run_setup_dialog():
+            print("[JARVIS] Setup was not completed. Exiting.")
+            sys.exit(1)
+
+    # -- Check if LLM key exists; if not, show setup dialog --------
+    from config import has_valid_llm_key
+    if not has_valid_llm_key():
+        print("[JARVIS] No API key configured. Starting first-time setup...\n")
+        if not _run_setup_dialog():
+            print("[JARVIS] Cannot start without an API key. Exiting.")
+            print("[JARVIS] Run again or manually add keys to .env")
+            sys.exit(1)
+
     # -- Validate configuration ------------------------------------
     from config import validate_config
     if not validate_config():
         print("[JARVIS] Configuration invalid. Cannot start.")
-        print("[JARVIS] Open .env and add your API keys, then try again.")
+        print("[JARVIS] Run with --setup to reconfigure, or edit .env directly.")
         sys.exit(1)
 
     print("[JARVIS] Configuration validated.")
-    print()
+    _show_provider_info()
 
     # -- Initialize pygame mixer early -----------------------------
     try:

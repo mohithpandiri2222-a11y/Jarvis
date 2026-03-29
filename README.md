@@ -1,176 +1,119 @@
-# J.A.R.V.I.S. — Voice-First AI Desktop Assistant
+# 🤖 J.A.R.V.I.S. — Voice-First AI Desktop Assistant
+
+![JARVIS Banner](file:///C:/Users/hp/.gemini/antigravity/brain/ffcf0d52-354f-44ba-9266-64f66eeaea34/jarvis_banner_1774790273763.png)
 
 > **Just A Rather Very Intelligent System**
-> Powered by GPT-4o + Murf Falcon TTS + Python
+> *Multi-Brain (GPT-4o / Claude / Gemini) + Murf Falcon TTS + Python*
 
-A voice-first AI desktop assistant inspired by Iron Man's Jarvis. Speak to it, and it speaks back with a natural human-like voice. It manages your schedule, sets reminders, detects conflicts, drafts replies, and opens websites — all through voice.
-
----
-
-## Features
-
-- **Voice Conversation** — Ask anything. Jarvis answers concisely in natural speech.
-- **Schedule Awareness** — Knows your weekly calendar. Detects conflicts instantly.
-- **Reminder Management** — Set, list, and delete reminders by voice.
-- **Smart Reply Drafting** — Drafts professional accept/decline emails for your approval.
-- **Browser Commands** — "Open YouTube" / "Search for machine learning" → opens in browser.
-- **Bilingual Support** — Speak in English or Hindi; Jarvis responds naturally.
-- **Premium GUI** — Dark-themed tkinter interface with live chat log and schedule panel.
+JARVIS is a premium, voice-first AI desktop assistant inspired by the iconic Iron Man interface. It acts as a personal agent on your computer, managing your life through voice commands with professional, calm, and slightly sarcastic wit.
 
 ---
 
-## Tech Stack
+## ✨ Key Features
 
-| Component         | Technology                          |
-|-------------------|-------------------------------------|
-| Language          | Python 3.10+                        |
-| AI Brain          | OpenAI GPT-4o                       |
-| Voice Output      | Murf Falcon TTS (GEN2 model)        |
-| Voice Input       | Google STT via SpeechRecognition    |
-| Audio Playback    | pygame                              |
-| Fallback TTS      | pyttsx3 (offline)                   |
-| GUI               | tkinter (dark theme)                |
+- **🧠 Multi-Provider Support** — Switch between OpenAI (GPT-4o), Anthropic (Claude Sonnet), or Google (Gemini) as your AI "brain".
+- **🎙️ Natural Voice Interaction** — Uses **Murf Falcon TTS (GEN2)** for human-like spoken responses. No robotic voices here.
+- **📅 Schedule Awareness** — Fully aware of your weekly calendar. It detects conflicts and manages your time intelligently.
+- **📝 Task & Reminder Management** — Set, list, and delete reminders by voice. Jarvis remembers everything.
+- **📧 Smart Reply Drafting** — Drafts professional email replies to meeting invites for your verbal approval.
+- **🌐 Browser Automation** — "Open YouTube" or "Search for Python tutorials" → executes instantly in your default browser.
+- **🇮🇳 Bilingual Fluency** — Naturally understands and responds in both English and Hindi (Hinglish).
+- **💅 Premium Dark GUI** — A sleek, translucent tkinter interface with a live conversation log and auto-refreshing schedule.
 
 ---
 
-## Setup Instructions
+## 🛠️ Tech Stack
+
+| Component | Technology |
+| :--- | :--- |
+| **Language** | Python 3.10+ |
+| **Brain Options** | OpenAI GPT-4o / Claude 3.7 Sonnet / Gemini 2.0 Flash |
+| **Voice Engine** | Murf Falcon TTS (Primary API) / pyttsx3 (Offline Fallback) |
+| **Speech Input** | SpeechRecognition (Google STT Engine) |
+| **Audio** | Pygame Mixer (High-Fidelity Playback) |
+| **UI** | Custom Tkinter Dark Theme |
+
+---
+
+## 🚀 Getting Started
 
 ### 1. Prerequisites
-- **Python 3.10 or higher** installed
-- A working **microphone**
-- **Internet connection** (for APIs)
+- **Python 3.10+** installed.
+- A functional **Microphone**.
+- **Internet connection** (required for LLM & Murf TTS).
 
-### 2. Install Dependencies
+### 2. Installation
+Clone the repository and install dependencies:
 
 ```bash
+# Install the core packages
 pip install -r requirements.txt
 ```
 
-**⚠ PyAudio on Windows:** If `pip install pyaudio` fails, use:
-```bash
-pip install pipwin
-pipwin install pyaudio
-```
+> [!TIP]
+> **Windows Users:** If `pyaudio` fails to install, try:
+> `pip install pipwin && pipwin install pyaudio`
 
-### 3. Configure API Keys
+### 3. Smart Setup (No config editing needed!)
+Simply run JARVIS. If it's your first time, a **Premium Setup Dialog** will appear automatically to help you:
+1. Select your preferred AI Provider.
+2. Enter your API Key.
+3. Configure your Murf TTS Key (optional).
 
-Open the `.env` file in the project root and replace the placeholder values:
-
-```env
-OPENAI_API_KEY=sk-your-actual-openai-key
-MURF_API_KEY=ap-your-actual-murf-key
-MURF_VOICE_ID=en-IN-isha
-```
-
-**Where to get keys:**
-- **OpenAI:** [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Murf:** [murf.ai/resources/api](https://murf.ai/resources/api)
-
-### 4. Run JARVIS
-
-**With GUI (recommended):**
 ```bash
 python main.py
 ```
 
-**Terminal-only mode:**
+To switch providers or keys later, use:
 ```bash
-python main.py --no-gui
-```
-
-**Run module tests:**
-```bash
-python main.py --test
+python main.py --setup
 ```
 
 ---
 
-## Project Structure
+## 🏗️ Project Structure
 
-```
+```text
 jarvis/
-├── main.py               ← Entry point
-├── config.py             ← API key loader & validator
-├── .env                  ← Your secret API keys
-├── requirements.txt      ← Python dependencies
+├── main.py               ← Entry point & setup handler
+├── config.py             ← Multi-provider config loader
 ├── core/
-│   ├── stt.py            ← Speech-to-Text (microphone → text)
-│   ├── llm.py            ← GPT-4o API (text → AI response)
-│   ├── tts.py            ← Murf Falcon TTS (text → voice)
-│   └── agent.py          ← Main loop (STT → LLM → TTS)
-├── data/
-│   ├── schedule.py       ← Mock weekly schedule
-│   └── reminders.py      ← In-memory reminder store
+│   ├── agent.py          ← Core execution logic (The Brain)
+│   ├── llm.py            ← Multi-provider API bridges (OpenAI/Claude/Gemini)
+│   ├── stt.py            ← Speech recognition engine
+│   └── tts.py            ← Murf / Pyttsx3 voice output
 ├── ui/
-│   └── gui.py            ← Dark-themed tkinter GUI
-└── audio/                ← Temp audio files (auto-created)
+│   ├── setup_dialog.py   ← Premium first-launch configuration
+│   └── gui.py            ← Main JARVIS interface
+├── data/
+│   ├── schedule.py       ← Your weekly calendar store
+│   └── reminders.py      ← Persistent reminder management
+└── .env                  ← Auto-generated API key storage
 ```
 
 ---
 
-## Demo Script (3 minutes)
+## 🗣️ Common Voice Commands
 
-Use this exact sequence when presenting:
-
-1. **Start** → Jarvis greets: *"Good to have you back, Bro."*
-2. **Ask a question:** *"Jarvis, explain machine learning in simple terms."*
-3. **Set a reminder:** *"Jarvis, remind me to submit my assignment at nine PM."*
-4. **Check schedule:** *"Jarvis, what does my week look like?"*
-5. **Conflict detection:** *"Jarvis, I got a meeting invite for Monday at three PM."*
-   → Jarvis detects the Project Review conflict and offers to draft a decline.
-6. **Draft reply:** *"Yes, draft a decline."*
-   → Jarvis reads the draft aloud for approval.
-7. **Browser command:** *"Jarvis, open YouTube."*
-   → YouTube opens in the browser.
+| Action | Example Phrase |
+| :--- | :--- |
+| **Information** | *"Jarvis, explain quantum computing like I'm five."* |
+| **Reminders** | *"Remind me to call the lead developer at 5 PM."* |
+| **Schedules** | *"What's on my agenda for Monday afternoon?"* |
+| **Conflicts** | *"I've got a meeting this Tuesday at 10 AM, check if I'm free."* |
+| **Emails** | *"Draft a polite decline for the marketing meeting."* |
+| **Browser** | *"Search for nearby coffee shops" or "Open GitHub."* |
+| **Exit** | *"Goodbye, Jarvis. Shutdown."* |
 
 ---
 
-## Voice Commands
+## 🔧 Troubleshooting
 
-| Say This                                    | Jarvis Does This                         |
-|---------------------------------------------|------------------------------------------|
-| "What is machine learning?"                 | Answers the question conversationally    |
-| "Remind me to call Rahul at 7 PM"           | Creates a reminder                       |
-| "What's on my schedule today?"              | Reads today's schedule                   |
-| "I got an invite for Monday at 3 PM"        | Checks for conflicts                     |
-| "Draft a decline"                           | Generates a polite decline email         |
-| "Open YouTube" / "Search for Python"        | Opens URL in browser                     |
-| "Exit" / "Goodbye" / "Shutdown"             | Shuts down gracefully                    |
+- **Missing Key Error:** Ensure you've completed the `--setup` or check your `.env` file for typos.
+- **Audio Playback Failure:** Ensure `pygame-ce` is installed and your default audio output is correct.
+- **Microphone Not Found:** Run `python main.py --test` to perform a hardware diagnostic.
+- **Murf 401 Error:** Your Murf API key is invalid or has expired credits.
 
 ---
 
-## Troubleshooting
-
-| Error                          | Fix                                                    |
-|--------------------------------|--------------------------------------------------------|
-| `No module named pyaudio`      | `pip install pipwin && pipwin install pyaudio`          |
-| `Could not understand audio`   | Speak clearly, reduce background noise                 |
-| Murf API 401 Unauthorized      | Check MURF_API_KEY in `.env`                           |
-| Murf API 400 Bad Request       | Check MURF_VOICE_ID spelling                           |
-| GPT-4o 429 Too Many Requests   | Add credits at platform.openai.com/billing             |
-| Audio cuts off                 | Ensure pygame busy-wait loop is working                |
-
----
-
-## Available Murf Voices
-
-| Voice ID         | Language       | Gender  |
-|------------------|----------------|---------|
-| `en-IN-isha`     | Indian English | Female  |
-| `en-US-natalie`  | US English     | Female  |
-| `en-US-marcus`   | US English     | Male    |
-
-Change the voice in `.env`:
-```env
-MURF_VOICE_ID=en-US-marcus
-```
-
----
-
-## License
-
-This project is for educational and demonstration purposes.
-
----
-
-*Built with ❤ using GPT-4o, Murf Falcon TTS, and Python.*
+*Built with ❤ for a futuristic desktop experience.*
