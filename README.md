@@ -1,7 +1,5 @@
 # 🤖 J.A.R.V.I.S. — Voice-First AI Desktop Assistant
 
-![JARVIS Banner](file:///C:/Users/hp/.gemini/antigravity/brain/ffcf0d52-354f-44ba-9266-64f66eeaea34/jarvis_banner_1774790273763.png)
-
 > **Just A Rather Very Intelligent System**
 > *Multi-Brain (GPT-4o / Claude / Gemini) + Murf Falcon TTS + Python*
 
