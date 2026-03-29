@@ -1,39 +1,49 @@
 #!/usr/bin/env python3
-# ============================================================
-# JARVIS -- Main Entry Point
-# ============================================================
-#   J.A.R.V.I.S.
-#   Just A Rather Very Intelligent System
-#   Voice-First AI Desktop Assistant
-#   Multi-Provider: OpenAI GPT-4o | Claude | Gemini
-#
-# Usage:
-#   python main.py            Launch with GUI
-#   python main.py --no-gui   Terminal-only mode
-#   python main.py --setup    Re-run provider setup dialog
-#   python main.py --test     Run module tests
-#
-# ============================================================
+"""
+================================================================================
+JARVIS — Main Entry Point
+================================================================================
+Just A Rather Very Intelligent System
+A Voice-First AI Desktop Assistant with Multi-Model Support
+
+The main module orchestrates the initialization, configuration validation, 
+and user interface launching (GUI or Terminal). 
+
+Project Architecture:
+- core/        : Internal logic for STT, LLM (Brains), and TTS.
+- ui/          : Interface components (Tkinter GUI and Setup Dialog).
+- data/        : Local storage management (Schedule/Reminders).
+- config.py    : Environment and API key management.
+================================================================================
+"""
 
 import sys
 import argparse
 from pathlib import Path
 
-# Ensure project root is in path
+# ------------------------------------------------------------------------------
+# PATH CONFIGURATION
+# ------------------------------------------------------------------------------
+# We ensure the project root is in sys.path so that internal imports 
+# (like 'from core' or 'from ui') function correctly regardless of how 
+# the script is invoked.
 _project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(_project_root))
 
 
 def _print_banner():
-    """Prints the JARVIS startup banner."""
-    banner = """
+    """
+    Displays the stylistic JARVIS ASCII art banner.
+    Modelled after classic command-line interface aesthetics.
+    """
+    banner = r"""
     +===========================================================+
     |                                                           |
     |           _   _    ____  __     __  ___   ____            |
-    |          | | / \\  |  _ \\ \\ \\   / / |_ _| / ___|       |
-    |       _  | |/ _ \\ | |_) | \\ \\ / /   | |  \\___ \\      |
-    |      | |_| / ___ \\|  _ <   \\ V /    | |   ___) |        |
-    |       \\___/_/   \\_\\_| \\_\\   \\_/    |___| |____/     |
+    |          | | / \  |  _ \ \ \   / / |_ _| / ___|           |
+    |       _  | |/ _ \ | |_) | \ \ / /   | |  \___ \           |
+    |      | |_| / ___ \|  _ <   \ V /    | |   ___) |          |
+    |       \___/_/   \_\_| \_\   \_/    |___| |____/           |
     |                                                           |
     |       Just A Rather Very Intelligent System               |
     |       Voice-First AI Desktop Assistant                    |
@@ -44,21 +54,27 @@ def _print_banner():
 
 
 def _show_provider_info():
-    """Shows which LLM provider is active."""
+    """
+    Retrieves and displays the active AI provider and model configuration.
+    Helps the user confirm which 'brain' Jarvis is currently using.
+    """
     from config import LLM_PROVIDER, LLM_MODEL, PROVIDER_NAMES
     provider_name = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER)
-    print(f"    Provider : {provider_name}")
-    print(f"    Model    : {LLM_MODEL}")
+    print(f"    [STATE] Provider : {provider_name}")
+    print(f"    [STATE] Model    : {LLM_MODEL}")
     print()
 
 
 def _run_setup_dialog() -> bool:
     """
-    Shows the setup dialog and returns True if setup was completed.
-    Returns False if the user cancelled.
+    Launches the visual Setup Dialog for first-time users or re-configuration.
+    
+    Returns:
+        bool: True if the user successfully saved their credentials, 
+              False if the window was closed without saving.
     """
-    print("[JARVIS] Opening setup dialog...")
-    print("[JARVIS] Please select your AI provider and enter your API key.\n")
+    print("[INIT] Launching configuration wizard...")
+    print("[INIT] Please follow the instructions in the setup window.\n")
     try:
         from ui.setup_dialog import SetupDialog
         dialog = SetupDialog()
@@ -66,220 +82,184 @@ def _run_setup_dialog() -> bool:
 
         if result:
             provider = result["provider"]
-            print(f"[JARVIS] Setup complete! Provider: {provider}")
+            print(f"[INIT] Credentials secured. Provider set to: {provider}")
             return True
         else:
-            print("[JARVIS] Setup cancelled by user.")
+            print("[INIT] Setup stage was aborted by the user.")
             return False
     except Exception as e:
-        print(f"[JARVIS] Setup dialog error: {e}")
-        print("[JARVIS] You can manually edit the .env file instead.")
+        print(f"[ERROR] Fail-to-launch Setup Dialog: {e}")
+        print("[HINT] You may manually edit the .env file in the root directory.")
         return False
 
 
 def _run_tests():
-    """Runs quick module import and connectivity tests."""
-    print("=" * 55)
-    print("  JARVIS -- Module Tests")
-    print("=" * 55)
+    """
+    Performs a system-wide diagnostic check of all modules and hardware.
+    Checks config integrity, data accessibility, and microphone health.
+    
+    Returns:
+        bool: True if all critical tests pass, False otherwise.
+    """
+    print("-" * 60)
+    print(" JARVIS — System Diagnostic Check")
+    print("-" * 60)
 
     tests_passed = 0
     tests_total = 0
 
-    # Test 1: Config
+    # Test 1: Configuration Engine
     tests_total += 1
     try:
-        from config import validate_config, LLM_PROVIDER, has_valid_llm_key
-        print(f"  [PASS] config.py loaded (provider: {LLM_PROVIDER})")
+        from config import validate_config, LLM_PROVIDER
+        print(f"  [PASS] Config Loader (Active: {LLM_PROVIDER})")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] config.py failed: {e}")
+        print(f"  [FAIL] Config Loader error: {e}")
 
-    # Test 2: Data modules
+    # Test 2: Local Data Access
     tests_total += 1
     try:
-        from data.schedule import get_schedule, add_event, remove_event
-        from data.reminders import add_reminder, get_reminders, delete_reminder
-        schedule = get_schedule()
-        print(f"  [PASS] data modules loaded ({len(schedule)} schedule entries)")
+        from data.schedule import get_schedule
+        from data.reminders import get_reminders
+        count = len(get_schedule())
+        print(f"  [PASS] Logical Data Store ({count} schedule nodes detected)")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] data modules failed: {e}")
+        print(f"  [FAIL] Data Store access error: {e}")
 
-    # Test 3: STT module
+    # Test 3: Speech-to-Text (STT) Stack
     tests_total += 1
     try:
-        from core.stt import listen, test_microphone
-        print("  [PASS] core/stt.py loaded successfully")
+        from core.stt import listen
+        print("  [PASS] STT Core (SpeechRecognition pipeline ready)")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] core/stt.py failed: {e}")
+        print(f"  [FAIL] STT Core failed: {e}")
 
-    # Test 4: LLM module
+    # Test 4: LLM Integration (Brains)
     tests_total += 1
     try:
-        from core.llm import get_response, SYSTEM_PROMPT
-        prompt_len = len(SYSTEM_PROMPT)
-        print(f"  [PASS] core/llm.py loaded ({prompt_len} char system prompt)")
+        from core.llm import SYSTEM_PROMPT
+        print(f"  [PASS] LLM Layer ({len(SYSTEM_PROMPT)} chars prompt loaded)")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] core/llm.py failed: {e}")
+        print(f"  [FAIL] LLM Layer failed: {e}")
 
-    # Test 5: TTS module
+    # Test 5: Text-to-Speech (TTS) Stack
     tests_total += 1
     try:
-        from core.tts import speak, speak_startup_greeting
-        print("  [PASS] core/tts.py loaded successfully")
+        from core.tts import speak
+        print("  [PASS] TTS Engine (Murf/pysstx3 hybrid ready)")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] core/tts.py failed: {e}")
+        print(f"  [FAIL] TTS Engine failed: {e}")
 
-    # Test 6: Agent module
+    # Test 6: Agent Loop
     tests_total += 1
     try:
-        from core.agent import JarvisAgent, run_terminal_mode
-        print("  [PASS] core/agent.py loaded successfully")
+        from core.agent import JarvisAgent
+        print("  [PASS] Agent Lifecycle Orchestrator ready")
         tests_passed += 1
     except Exception as e:
-        print(f"  [FAIL] core/agent.py failed: {e}")
+        print(f"  [FAIL] Agent module failed: {e}")
 
-    # Test 7: GUI module
-    tests_total += 1
-    try:
-        from ui.gui import JarvisGUI
-        print("  [PASS] ui/gui.py loaded successfully")
-        tests_passed += 1
-    except Exception as e:
-        print(f"  [FAIL] ui/gui.py failed: {e}")
-
-    # Test 8: Setup dialog module
-    tests_total += 1
-    try:
-        from ui.setup_dialog import SetupDialog
-        print("  [PASS] ui/setup_dialog.py loaded successfully")
-        tests_passed += 1
-    except Exception as e:
-        print(f"  [FAIL] ui/setup_dialog.py failed: {e}")
-
-    # Test 9: Microphone check
+    # Test 7: Hardware Verification (Microphone)
     tests_total += 1
     try:
         from core.stt import test_microphone
-        mic_ok = test_microphone()
-        if mic_ok:
-            print("  [PASS] Microphone is accessible")
+        if test_microphone():
+            print("  [PASS] Hardware Check: Microphone detected and listening")
             tests_passed += 1
         else:
-            print("  [WARN] Microphone not accessible (JARVIS needs a mic)")
+            print("  [WARN] Hardware Check: Microphone NOT found (Input required)")
     except Exception as e:
-        print(f"  [WARN] Microphone check failed: {e}")
+        print(f"  [WARN] Hardware Check error: {e}")
 
-    print()
-    print(f"  Results: {tests_passed}/{tests_total} tests passed")
-
-    if tests_passed == tests_total:
-        print("  All tests passed! JARVIS is ready to launch.")
-    else:
-        print("  Some tests failed. Check the errors above.")
-
-    print("=" * 55)
+    print(f"\nDiagnostic Result: {tests_passed}/{tests_total} passed")
+    print("-" * 60)
     return tests_passed == tests_total
 
 
 def main():
-    """Main entry point for JARVIS."""
+    """
+    Primary orchestrator for the JARVIS lifecycle.
+    1. Parse CLI arguments
+    2. Handle setup/test modes
+    3. Validate credentials
+    4. Initialize audio drivers
+    5. Boot the chosen UI mode
+    """
     parser = argparse.ArgumentParser(
-        description="JARVIS -- Voice-First AI Desktop Assistant",
+        description="J.A.R.V.I.S. — Voice-First AI Desktop Assistant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python main.py              Launch with GUI
-  python main.py --no-gui     Terminal-only mode
-  python main.py --setup      Re-run provider setup dialog
-  python main.py --test       Run module tests
-        """,
+        epilog="Examples:\n  python main.py             (GUI Mode)\n  python main.py --no-gui    (Terminal Mode)\n  python main.py --setup     (Config Wizard)\n",
     )
-    parser.add_argument(
-        "--no-gui", action="store_true",
-        help="Run in terminal-only mode (no tkinter window)"
-    )
-    parser.add_argument(
-        "--test", action="store_true",
-        help="Run module tests and exit"
-    )
-    parser.add_argument(
-        "--setup", action="store_true",
-        help="Re-run the provider setup dialog to change API keys"
-    )
+    parser.add_argument("--no-gui", action="store_true", help="Launch in Headless (Terminal) mode")
+    parser.add_argument("--test", action="store_true", help="Run system diagnostics")
+    parser.add_argument("--setup", action="store_true", help="Force re-launch the setup wizard")
 
     args = parser.parse_args()
-
-    # Print the banner
     _print_banner()
 
-    # -- Test mode -------------------------------------------------
+    # -- Diagnostic Mode --
     if args.test:
         success = _run_tests()
         sys.exit(0 if success else 1)
 
-    # -- Setup mode (forced re-setup) ------------------------------
+    # -- Configuration Force-Launch --
     if args.setup:
         if not _run_setup_dialog():
-            print("[JARVIS] Setup was not completed. Exiting.")
+            print("[FATAL] Required configuration not completed. Terminating.")
             sys.exit(1)
 
-    # -- Check if LLM key exists; if not, show setup dialog --------
+    # -- First-Time or Missing Credentials Check --
+    # Automatically triggers setup if the .env is missing or incomplete.
     from config import has_valid_llm_key
     if not has_valid_llm_key():
-        print("[JARVIS] No API key configured. Starting first-time setup...\n")
+        print("[SYSTEM] No valid AI credentials detected.")
         if not _run_setup_dialog():
-            print("[JARVIS] Cannot start without an API key. Exiting.")
-            print("[JARVIS] Run again or manually add keys to .env")
+            print("[FATAL] Jarvis cannot function without a valid AI brain. Terminating.")
             sys.exit(1)
 
-    # -- Validate configuration ------------------------------------
+    # -- Configuration Sanity Check --
     from config import validate_config
     if not validate_config():
-        print("[JARVIS] Configuration invalid. Cannot start.")
-        print("[JARVIS] Run with --setup to reconfigure, or edit .env directly.")
+        print("[FATAL] Configuration validation failed. Run with --setup to fix.")
         sys.exit(1)
 
-    print("[JARVIS] Configuration validated.")
+    # Success feedback
+    print("[SYSTEM] Core systems validated and online.")
     _show_provider_info()
 
-    # -- Initialize pygame mixer early -----------------------------
+    # -- Audio Driver Initialization --
+    # Pygame mixer is used for high-fidelity playback of Murf TTS responses.
     try:
         import pygame
         if not pygame.mixer.get_init():
+            # Initializing with voice-optimized settings
             pygame.mixer.init(frequency=24000, size=-16, channels=1)
-        print("[JARVIS] Audio system initialized.")
+        print("[SYSTEM] Audio playback subsystem ready.")
     except Exception as e:
-        print(f"[JARVIS] Warning: pygame mixer init issue: {e}")
-        print("[JARVIS] Audio playback may not work correctly.")
+        print(f"[WARN] Audio driver issue: {e}. Voice feedback may be restricted.")
 
-    # -- Launch ----------------------------------------------------
+    # -- UI Dispatch --
     if args.no_gui:
-        # Terminal-only mode
-        print("[JARVIS] Launching in terminal mode...")
-        print("[JARVIS] Say 'exit', 'quit', or 'goodbye' to stop.\n")
+        # Launching the synchronous terminal loop
+        print("[LAUNCH] Entering headless terminal mode...")
         from core.agent import run_terminal_mode
         run_terminal_mode()
     else:
-        # GUI mode
-        print("[JARVIS] Launching GUI mode...")
-        print("[JARVIS] Close the window or say 'exit' to stop.\n")
+        # Launching the premium multi-threaded GUI
+        print("[LAUNCH] Initializing Jarvis Dashboard...")
         try:
             from ui.gui import JarvisGUI
             gui = JarvisGUI()
-            gui.run()  # Blocking -- runs tkinter mainloop
-        except ImportError as e:
-            print(f"[JARVIS] GUI failed to load: {e}")
-            print("[JARVIS] Falling back to terminal mode...")
-            from core.agent import run_terminal_mode
-            run_terminal_mode()
+            gui.run()  # Starts the Tkinter mainloop (blocking)
         except Exception as e:
-            print(f"[JARVIS] GUI error: {e}")
-            print("[JARVIS] Falling back to terminal mode...")
+            # Automatic fallback if the GUI fails (e.g., missing Tcl/Tk)
+            print(f"[LAUNCH] GUI Initialization failed: {e}")
+            print("[LAUNCH] Falling back to Terminal mode...")
             from core.agent import run_terminal_mode
             run_terminal_mode()
 

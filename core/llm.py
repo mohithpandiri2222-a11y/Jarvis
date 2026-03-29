@@ -1,11 +1,19 @@
-# ============================================================
-# JARVIS — LLM Module (core/llm.py)
-# ============================================================
-# Multi-provider LLM module supporting OpenAI, Claude, and Gemini.
-# Handles API calls with the JARVIS system prompt,
-# context injection (schedule + reminders), action tag parsing,
-# and conversation history management.
-# ============================================================
+"""
+================================================================================
+JARVIS — LLM Brain Module (core/llm.py)
+================================================================================
+The Intelligence Layer supporting OpenAI, Anthropic, and Google.
+
+This module acts as a universal adapter between Jarvis's high-level agent logic
+and the specific API protocols of the world's leading AI providers.
+
+Responsibilities:
+1. Provider Switching: Dynamic routing to OpenAI, Claude, or Gemini.
+2. Context Injection: Automatically appends the user's schedule & reminders.
+3. Personality Alignment: Enforces the JARVIS system prompt (Iron Man style).
+4. Action Tag Extraction: Parses [ACTION:...], [REMINDER:...], etc.
+================================================================================
+"""
 
 import json
 import re
@@ -31,43 +39,48 @@ from data.schedule import get_schedule, add_event, remove_event
 from data.reminders import get_reminders, add_reminder, delete_reminder
 
 
-# ── Provider Clients (lazy-initialized) ──────────────────────
+# ------------------------------------------------------------------------------
+# API CLIENT MANAGEMENT (LAZY INITIALIZATION)
+# ------------------------------------------------------------------------------
+# We don't import or initialize SDKs until they are actually needed.
+# This prevents crashes if a user only has one provider's library installed.
 _openai_client = None
 _anthropic_client = None
 _gemini_client = None
 
 
 def _get_openai_client():
-    """Lazy-init OpenAI client."""
+    """Initializes the OpenAI SDK with the current API key."""
     global _openai_client
     if _openai_client is None:
         from openai import OpenAI
-        from config import OPENAI_API_KEY as key
-        _openai_client = OpenAI(api_key=key)
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
     return _openai_client
 
 
 def _get_anthropic_client():
-    """Lazy-init Anthropic client."""
+    """Initializes the Anthropic (Claude) SDK."""
     global _anthropic_client
     if _anthropic_client is None:
         import anthropic
-        from config import ANTHROPIC_API_KEY as key
-        _anthropic_client = anthropic.Anthropic(api_key=key)
+        _anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     return _anthropic_client
 
 
 def _get_gemini_client():
-    """Lazy-init Google Gemini client."""
+    """Initializes the Google Gemini SDK (v1.0.0+ style)."""
     global _gemini_client
     if _gemini_client is None:
         from google import genai
-        from config import GEMINI_API_KEY as key
-        _gemini_client = genai.Client(api_key=key)
+        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     return _gemini_client
 
 
-# ── The JARVIS System Prompt ─────────────────────────────────
+# ------------------------------------------------------------------------------
+# THE JARVIS PERSONALITY PROMPT
+# ------------------------------------------------------------------------------
+# This is the 'Core Directive'. It defines how Jarvis speaks, his relationship
+# with the user ('Bro'), and his persona (Iron Man film style).
 SYSTEM_PROMPT = r"""You are JARVIS — an intelligent, voice-first personal AI assistant running as a desktop application on the user's computer. You are modelled after the AI from the Iron Man films: calm, precise, slightly dry in humour, deeply loyal to your user, and always one step ahead. You call the user "Bro" — never their name unless they tell you it. You are not a chatbot. You are a personal agent.
 
 YOUR IDENTITY
@@ -138,7 +151,12 @@ CURRENT_DATE: ...
 Always read this context silently. Never read it aloud. Use it to inform your response."""
 
 
-# ── Action Tag Patterns ──────────────────────────────────────
+# ------------------------------------------------------------------------------
+# ACTION TAG REGEX PATTERNS
+# ------------------------------------------------------------------------------
+# Jarvis executes machine actions by emitting specific bracketed tags in his text.
+# The code intercepts these tags BEFORE the text reaches the user's ears (TTS).
+
 _URL_ACTION_PATTERN = re.compile(r'\[ACTION:OPEN_URL:(.*?)\]')
 _REMINDER_ADD_PATTERN = re.compile(r'\[REMINDER:ADD:(.*?):(.*?):(.*?)\]')
 _REMINDER_DELETE_PATTERN = re.compile(r'\[REMINDER:DELETE:(\d+)\]')
@@ -148,8 +166,9 @@ _SCHEDULE_REMOVE_PATTERN = re.compile(r'\[SCHEDULE:REMOVE:(.*?):(.*?)\]')
 
 def _build_context_block() -> str:
     """
-    Builds the context string that gets appended to each user message.
-    Contains current schedule, reminders, and date/time.
+    Constructs a JSON-formatted string of current user data.
+    This is HIDDEN from the user but given to the LLM in every message 
+    so Jarvis 'knows' what the user is currently doing.
     """
     schedule_json = json.dumps(get_schedule(), indent=2)
     reminders_json = json.dumps(get_reminders(), indent=2)
@@ -167,84 +186,78 @@ def _build_context_block() -> str:
 
 def _process_action_tags(response_text: str) -> str:
     """
-    Scans the response for action tags, executes them, and strips
-    them from the text so they don't go to TTS.
-
-    Returns the cleaned text.
+    Detects and executes embedded action tags, then strips them from the response.
+    
+    Args:
+        response_text: The raw LLM response containing potential tags.
+        
+    Returns:
+        str: The 'cleaned' response ready for Text-to-Speech output.
     """
     clean_text = response_text
 
-    # ── URL Actions ──────────────────────────────────────────
+    # -- 1. Web Automation --
     url_matches = _URL_ACTION_PATTERN.findall(clean_text)
     for url in url_matches:
         url = url.strip()
-        print(f"🌐 Opening URL: {url}")
+        print(f"🌐 [AUTO] Navigation triggered: {url}")
         try:
             webbrowser.open(url)
         except Exception as e:
-            print(f"   Failed to open URL: {e}")
+            print(f"   [FAIL] Browser automation error: {e}")
     clean_text = _URL_ACTION_PATTERN.sub('', clean_text)
 
-    # ── Reminder ADD Actions ─────────────────────────────────
+    # -- 2. Reminder Management (ADD) --
     reminder_add_matches = _REMINDER_ADD_PATTERN.findall(clean_text)
     for task, time_str, date_str in reminder_add_matches:
-        task = task.strip()
-        time_str = time_str.strip()
-        date_str = date_str.strip()
-        print(f"📝 Adding reminder: {task} at {time_str} on {date_str}")
-        add_reminder(task, time_str, date_str)
+        print(f"📝 [AUTO] Database Write: Added Reminder '{task}' for {time_str} ({date_str})")
+        add_reminder(task.strip(), time_str.strip(), date_str.strip())
     clean_text = _REMINDER_ADD_PATTERN.sub('', clean_text)
 
-    # ── Reminder DELETE Actions ──────────────────────────────
+    # -- 3. Reminder Management (DELETE) --
     reminder_del_matches = _REMINDER_DELETE_PATTERN.findall(clean_text)
     for rid in reminder_del_matches:
-        rid = int(rid.strip())
-        print(f"🗑  Deleting reminder ID: {rid}")
-        delete_reminder(rid)
+        print(f"🗑  [AUTO] Database Delete: Removed Reminder ID {rid}")
+        delete_reminder(int(rid.strip()))
     clean_text = _REMINDER_DELETE_PATTERN.sub('', clean_text)
 
-    # ── Schedule ADD Actions ─────────────────────────────────
+    # -- 4. Schedule Management (ADD) --
     schedule_add_matches = _SCHEDULE_ADD_PATTERN.findall(clean_text)
     for day, time_str, event in schedule_add_matches:
-        day = day.strip()
-        time_str = time_str.strip()
-        event = event.strip()
-        print(f"📅 Adding schedule event: {event} on {day} at {time_str}")
-        add_event(day, time_str, event)
+        print(f"📅 [AUTO] Schedule Update: Added '{event}' on {day} at {time_str}")
+        add_event(day.strip(), time_str.strip(), event.strip())
     clean_text = _SCHEDULE_ADD_PATTERN.sub('', clean_text)
 
-    # ── Schedule REMOVE Actions ──────────────────────────────
+    # -- 5. Schedule Management (REMOVE) --
     schedule_rem_matches = _SCHEDULE_REMOVE_PATTERN.findall(clean_text)
     for day, time_str in schedule_rem_matches:
-        day = day.strip()
-        time_str = time_str.strip()
-        print(f"📅 Removing schedule event on {day} at {time_str}")
-        remove_event(day, time_str)
+        print(f"📅 [AUTO] Schedule Update: Removed entry on {day} at {time_str}")
+        remove_event(day.strip(), time_str.strip())
     clean_text = _SCHEDULE_REMOVE_PATTERN.sub('', clean_text)
 
-    # Clean up extra whitespace from tag removal
+    # Strip redundant trailing whitespace from the final TTS-bound text
     clean_text = re.sub(r'\s{2,}', ' ', clean_text).strip()
-
     return clean_text
 
 
 def _trim_history(history: list) -> list:
     """
-    Trims conversation history to the last MAX_CONVERSATION_HISTORY messages.
+    Prevents conversation history from exceeding Token/Memory limits.
+    Maintains the last N messages to ensure coherent continuity.
     """
     if len(history) > MAX_CONVERSATION_HISTORY:
         return history[-MAX_CONVERSATION_HISTORY:]
     return history
 
 
-# ═══════════════════════════════════════════════════════════════
-# PROVIDER-SPECIFIC CALL FUNCTIONS
-# ═══════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------------------
+# PROVIDER-SPECIFIC API ADAPTERS
+# ------------------------------------------------------------------------------
 
 def _call_openai(messages: list) -> str:
-    """Call OpenAI API and return the response text."""
+    """Standard OpenAI ChatCompletion protocol."""
     client = _get_openai_client()
-    print("🤖 Calling OpenAI GPT-4o...")
+    print(f"🤖 [BRAIN] Dispatching request to OpenAI-API (Model: {LLM_MODEL})...")
     response = client.chat.completions.create(
         model=LLM_MODEL,
         messages=messages,
@@ -255,14 +268,11 @@ def _call_openai(messages: list) -> str:
 
 
 def _call_claude(messages: list) -> str:
-    """
-    Call Anthropic Claude API and return the response text.
-    Claude uses a separate 'system' param instead of a system message in the list.
-    """
+    """Anthropic Messages standard (Claude 3/3.5)."""
     client = _get_anthropic_client()
-    print("🤖 Calling Anthropic Claude...")
+    print(f"🤖 [BRAIN] Dispatching request to Anthropic-API (Model: {LLM_MODEL})...")
 
-    # Extract system prompt and conversation messages
+    # Claude places the system instruction into a separate field.
     system_text = ""
     conversation = []
     for msg in messages:
@@ -281,31 +291,24 @@ def _call_claude(messages: list) -> str:
 
 
 def _call_gemini(messages: list) -> str:
-    """
-    Call Google Gemini API and return the response text.
-    Converts the OpenAI-style messages into Gemini's format.
-    """
+    """Google Gemini v1/v2 SDK protocol."""
     client = _get_gemini_client()
-    print("🤖 Calling Google Gemini...")
+    print(f"🤖 [BRAIN] Dispatching request to Google-API (Model: {LLM_MODEL})...")
 
-    # Extract system instruction and conversation
     system_text = ""
     conversation_parts = []
+    
+    # Map messages to Gemini's specific role terminology
     for msg in messages:
         if msg["role"] == "system":
             system_text = msg["content"]
-        elif msg["role"] == "user":
+        else:
+            role = "model" if msg["role"] == "assistant" else "user"
             conversation_parts.append({
-                "role": "user",
-                "parts": [{"text": msg["content"]}],
-            })
-        elif msg["role"] == "assistant":
-            conversation_parts.append({
-                "role": "model",
+                "role": role,
                 "parts": [{"text": msg["content"]}],
             })
 
-    # Build config with system instruction
     from google.genai import types
     config = types.GenerateContentConfig(
         system_instruction=system_text,
@@ -321,7 +324,7 @@ def _call_gemini(messages: list) -> str:
     return response.text
 
 
-# Provider dispatch map
+# Dynamic Dispatch Table
 _PROVIDER_FUNCTIONS = {
     "openai": _call_openai,
     "claude": _call_claude,
@@ -329,98 +332,82 @@ _PROVIDER_FUNCTIONS = {
 }
 
 
-# ═══════════════════════════════════════════════════════════════
-# MAIN PUBLIC FUNCTION
-# ═══════════════════════════════════════════════════════════════
+# ------------------------------------------------------------------------------
+# PRIMARY PUBLIC INTERFACE
+# ------------------------------------------------------------------------------
 
 def get_response(user_text: str, history: list, status_callback=None) -> tuple:
     """
-    Sends user text to the configured LLM provider and returns the response.
-
+    Processes user input, queries the active AI 'brain', and executes logic.
+    
     Args:
-        user_text: The transcribed text from the user.
-        history: Conversation history as a list of message dicts.
-        status_callback: Optional function(status_str) for GUI updates.
-
+        user_text (str): Hand-transcribed user speech.
+        history (list): Current session message history.
+        status_callback (callable): UI hook for real-time status updates.
+        
     Returns:
-        Tuple of (clean_response_text, updated_history)
-        clean_response_text has all action tags stripped (safe for TTS).
+        tuple: (clean_spoken_text, updated_memory_history)
     """
     if status_callback:
-        status_callback("Thinking...")
+        status_callback("Jarvis is thinking...")
 
-    # Build the user message with context injected
+    # Enrich user message with real-time context (Schedule, Reminders, Date)
     context_block = _build_context_block()
-    user_message_with_context = user_text + context_block
+    user_payload = user_text + context_block
 
-    # Add user message to history
-    history.append({"role": "user", "content": user_message_with_context})
-
-    # Trim history to prevent token overflow
+    # Update session memory
+    history.append({"role": "user", "content": user_payload})
     history = _trim_history(history)
 
-    # Build the full messages array
-    messages = [
+    # Compile final message stack for the LLM
+    final_messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         *history
     ]
 
     try:
-        # Import current provider at call-time (supports runtime switching)
         from config import LLM_PROVIDER as current_provider
-
-        provider_name = PROVIDER_NAMES.get(current_provider, current_provider)
         call_fn = _PROVIDER_FUNCTIONS.get(current_provider)
-
+        
         if not call_fn:
-            raise ValueError(
-                f"Unknown LLM provider: '{current_provider}'. "
-                f"Supported: openai, claude, gemini"
-            )
+            raise ValueError(f"Provider '{current_provider}' is not implemented in core/llm.py dispatcher.")
 
-        raw_response = call_fn(messages)
-        print(f"💬 Jarvis (raw): {raw_response}")
+        # Dispatch API Call
+        raw_response = call_fn(final_messages)
+        print(f"💬 [BRAIN] Response received (Raw size: {len(raw_response)} chars)")
 
-        # Process action tags and get clean text for TTS
+        # Execute actions and prep text for TTS
         clean_response = _process_action_tags(raw_response)
 
-        # Add assistant response to history (store the raw version for context)
+        # Store the RAW response in memory (to keep tags for future context)
         history.append({"role": "assistant", "content": raw_response})
         history = _trim_history(history)
 
         return clean_response, history
 
     except Exception as e:
-        error_msg = f"I'm having trouble connecting to my brain right now, Bro. Error: {str(e)}"
-        print(f"⚠  LLM API Error: {e}")
-
-        # Still add to history so the conversation doesn't break
+        error_msg = f"I've encountered a glitch in my cognition system, Bro. Error: {str(e)}"
+        print(f"⚠  [BRAIN_FAIL] Critical API error: {e}")
+        
+        # We append the error message to history so the flow continues gracefully.
         history.append({"role": "assistant", "content": error_msg})
-        history = _trim_history(history)
-
         return error_msg, history
 
 
-# ── Self-test ────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# MODULE TESTING
+# ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  JARVIS LLM — Quick Test")
-    print("=" * 50)
-    print(f"  Provider  : {LLM_PROVIDER}")
-    print(f"  Model     : {LLM_MODEL}")
-    print(f"  Max Tokens: {OPENAI_MAX_TOKENS}")
-    print(f"  Temp      : {OPENAI_TEMPERATURE}")
-    print(f"  History   : {MAX_CONVERSATION_HISTORY} messages max")
-    print()
+    print("-" * 60)
+    print(" JARVIS Intelligence Stack — Module Test")
+    print("-" * 60)
+    print(f"  Target Provider: {PROVIDER_NAMES.get(LLM_PROVIDER)}")
+    print(f"  Target Model   : {LLM_MODEL}")
+    print("-" * 60)
 
-    test_history = []
-    test_input = "Hello Jarvis, how are you?"
-    print(f"  Test input: \"{test_input}\"")
-
-    try:
-        response_text, updated_history = get_response(test_input, test_history)
-        print(f"\n  Response: \"{response_text}\"")
-        print(f"  History length: {len(updated_history)} messages")
-        print("\n  ✓ LLM module is working correctly.")
-    except Exception as e:
-        print(f"\n  ✗ LLM test failed: {e}")
+    test_msg = "Jarvis, identify yourself."
+    print(f"  [Input] {test_msg}")
+    
+    res, hist = get_response(test_msg, [])
+    print(f"  [Output] {res}")
+    print("-" * 60)

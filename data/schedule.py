@@ -1,168 +1,118 @@
-# ============================================================
-# JARVIS — Schedule Data Module (data/schedule.py)
-# ============================================================
-# Mock schedule stored as a Python list of dicts.
-# In a future version, this would connect to Google Calendar.
-# ============================================================
+"""
+================================================================================
+JARVIS — Schedule Engine (data/schedule.py)
+================================================================================
+Local Calendar & Time-Slot Management.
+
+This module provides the interface for Jarvis to:
+1. Retrieve the user's weekly agenda.
+2. Search for events on specific days.
+3. Dynamically inject new events from voice commands.
+4. Verify time-slot availability (Conflict Detection).
+
+Currently implemented as a high-performance in-memory list for prototyping.
+================================================================================
+"""
 
 import json
 from typing import List, Dict, Optional
 
-# ── The Mock Schedule ────────────────────────────────────────
-# This is the hardcoded schedule for the prototype.
-# Each entry has: day, time, event
+# ------------------------------------------------------------------------------
+# THE PERSISTENT DATA SCHEMA
+# ------------------------------------------------------------------------------
+# In a real-world scenario, this 'database' would be replaced by a 
+# Google Calendar or Outlook API connector.
 _schedule: List[Dict[str, str]] = [
     {"day": "Monday",    "time": "10:00 AM", "event": "Team Standup"},
-    {"day": "Monday",    "time": "3:00 PM",  "event": "Project Review"},
-    {"day": "Tuesday",   "time": "11:00 AM", "event": "Client Call - Sharma"},
-    {"day": "Tuesday",   "time": "4:00 PM",  "event": "Free"},
+    {"day": "Monday",    "time": "03:00 PM", "event": "Project Review"},
+    {"day": "Tuesday",   "time": "11:00 AM", "event": "Client Call: Sharma"},
+    {"day": "Tuesday",   "time": "04:00 PM", "event": "Free"},
     {"day": "Wednesday", "time": "10:00 AM", "event": "Sprint Planning"},
-    {"day": "Wednesday", "time": "2:00 PM",  "event": "Free"},
-    {"day": "Thursday",  "time": "9:00 AM",  "event": "Design Review"},
-    {"day": "Thursday",  "time": "4:00 PM",  "event": "Free"},
-    {"day": "Friday",    "time": "3:00 PM",  "event": "Free"},
-    {"day": "Friday",    "time": "6:00 PM",  "event": "Team Dinner"},
+    {"day": "Wednesday", "time": "02:00 PM", "event": "Free"},
+    {"day": "Thursday",  "time": "09:00 AM", "event": "Core Design Review"},
+    {"day": "Thursday",  "time": "04:00 PM", "event": "Free"},
+    {"day": "Friday",    "time": "03:00 PM", "event": "Free"},
+    {"day": "Friday",    "time": "06:00 PM", "event": "Team Social Dinner"},
 ]
 
 
 def get_schedule() -> List[Dict[str, str]]:
-    """
-    Returns the current schedule as a list of dicts.
-    Each dict has keys: 'day', 'time', 'event'.
-    """
+    """Returns a protected copy of the entire scheduling database."""
     return _schedule.copy()
 
 
 def get_schedule_for_day(day: str) -> List[Dict[str, str]]:
-    """
-    Returns all schedule entries for a specific day.
-
-    Args:
-        day: Day name (e.g., "Monday", "Tuesday")
-
-    Returns:
-        List of schedule entries for that day.
-    """
-    day_lower = day.strip().lower()
-    return [
-        entry for entry in _schedule
-        if entry["day"].lower() == day_lower
-    ]
+    """Filters the calendar for events matching a specific day index."""
+    query = day.strip().lower()
+    return [e for e in _schedule if e["day"].lower() == query]
 
 
 def add_event(day: str, time: str, event: str) -> Dict[str, str]:
     """
-    Adds a new event to the schedule.
-
+    Appends a new logical event node to the user's agenda.
+    
     Args:
-        day: Day of the week (e.g., "Monday")
-        time: Time string (e.g., "3:00 PM")
-        event: Event description (e.g., "Meeting with John")
-
-    Returns:
-        The newly created schedule entry.
+        day (str): Human-readable day (e.g., 'Monday').
+        time (str): Formatted time (e.g., '05:00 PM').
+        event (str): Descriptive text for the activity.
     """
-    new_entry = {
-        "day": day.strip(),
-        "time": time.strip(),
-        "event": event.strip(),
-    }
-    _schedule.append(new_entry)
-    print(f"[SCHEDULE] Added: {event} on {day} at {time}")
-    return new_entry
+    new_node = {"day": day.strip(), "time": time.strip(), "event": event.strip()}
+    _schedule.append(new_node)
+    print(f"[DATA] Schedule Write: Added '{event}' on {day} at {time}.")
+    return new_node
 
 
 def remove_event(day: str, time: str) -> bool:
     """
-    Removes an event from the schedule by day and time.
-
-    Args:
-        day: Day of the week.
-        time: Time string.
-
+    Locates and purges an event by its exact time-slot.
+    
     Returns:
-        True if an event was removed, False if not found.
+        bool: True if the operation resulted in a deletion.
     """
     global _schedule
-    day_lower = day.strip().lower()
-    time_lower = time.strip().lower()
-
-    original_length = len(_schedule)
-    _schedule = [
-        entry for entry in _schedule
-        if not (entry["day"].lower() == day_lower and
-                entry["time"].lower() == time_lower)
-    ]
-
-    removed = len(_schedule) < original_length
-    if removed:
-        print(f"[SCHEDULE] Removed event on {day} at {time}")
-    else:
-        print(f"[SCHEDULE] No event found on {day} at {time}")
-    return removed
+    d, t = day.strip().lower(), time.strip().lower()
+    
+    initial_count = len(_schedule)
+    _schedule = [e for e in _schedule if not (e["day"].lower() == d and e["time"].lower() == t)]
+    
+    success = len(_schedule) < initial_count
+    if success: print(f"[DATA] Schedule Write: Removed slot {day} {time}.")
+    return success
 
 
-def check_conflict(day: str, time: str) -> Optional[Dict[str, str]]:
+def check_collision(day: str, time: str) -> Optional[Dict[str, str]]:
     """
-    Checks if there's an existing (non-Free) event at the given day and time.
-
-    Args:
-        day: Day of the week.
-        time: Time string.
-
-    Returns:
-        The conflicting event entry, or None if the slot is free.
+    Detects if a requested time slot is preoccupied by a non-'Free' event.
+    Essential for Jarvis's 'smart' conflict detection logic.
     """
-    day_lower = day.strip().lower()
-    time_lower = time.strip().lower()
-
+    d, t = day.strip().lower(), time.strip().lower()
     for entry in _schedule:
-        if (entry["day"].lower() == day_lower and
-                entry["time"].lower() == time_lower and
-                entry["event"].lower() != "free"):
-            return entry
+        if entry["day"].lower() == d and entry["time"].lower() == t:
+            if entry["event"].lower() != "free":
+                return entry
     return None
 
 
-def get_schedule_summary() -> str:
-    """
-    Returns a human-readable summary of the schedule.
-    Useful for terminal display and debugging.
-    """
-    lines = ["=" * 45, "  WEEKLY SCHEDULE", "=" * 45]
-    current_day = ""
-
-    for entry in sorted(_schedule, key=lambda x: (
-        ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
-         "Saturday", "Sunday"].index(x["day"])
-        if x["day"] in ["Monday", "Tuesday", "Wednesday", "Thursday",
-                         "Friday", "Saturday", "Sunday"] else 7
-    )):
-        if entry["day"] != current_day:
-            current_day = entry["day"]
-            lines.append(f"\n  {current_day}:")
-        status = "  ✓" if entry["event"].lower() != "free" else "  ○"
-        lines.append(f"    {status} {entry['time']:>8}  {entry['event']}")
-
-    lines.append("\n" + "=" * 45)
-    return "\n".join(lines)
+# ------------------------------------------------------------------------------
+# CONSOLE UTILITIES
+# ------------------------------------------------------------------------------
+def get_visual_summary() -> str:
+    """Generates a formatted ASCII table of the user's week for logs."""
+    output = ["-" * 60, " JARVIS — LOCAL AGENDA SUMMARY", "-" * 60]
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Simple nested loop for day-grouping
+    for d in days:
+        daily_items = get_schedule_for_day(d)
+        if daily_items:
+            output.append(f"\n[{d.upper()}]")
+            for i in daily_items:
+                marker = " [!] " if i["event"].lower() != "free" else " [ ] "
+                output.append(f"  {marker} {i['time']:>8} : {i['event']}")
+    
+    output.append("\n" + "-" * 60)
+    return "\n".join(output)
 
 
-# ── Self-test ────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(get_schedule_summary())
-    print()
-
-    # Test conflict detection
-    conflict = check_conflict("Monday", "3:00 PM")
-    if conflict:
-        print(f"Conflict found: {conflict['event']} at {conflict['time']}")
-    else:
-        print("No conflict at Monday 3:00 PM")
-
-    # Test adding
-    add_event("Wednesday", "5:00 PM", "Gym Session")
-    print(f"\nSchedule now has {len(get_schedule())} entries.")
-
-    # Test JSON output (what goes to GPT-4o)
-    print(f"\nJSON:\n{json.dumps(get_schedule(), indent=2)}")
+    print(get_visual_summary())

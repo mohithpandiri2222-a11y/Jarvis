@@ -1,31 +1,43 @@
-# ============================================================
-# JARVIS — Configuration Loader
-# ============================================================
-# Loads API keys and settings from .env file.
-# Supports multiple LLM providers: OpenAI, Claude, Gemini.
-# Validates that the selected provider's key is present.
-# ============================================================
+"""
+================================================================================
+JARVIS — Configuration Loader
+================================================================================
+Secure Credential Management & Multi-Provider Config Engine
+
+This module is responsible for:
+1. Loading and parsing environment variables (.env).
+2. Dynamically switching LLM providers (OpenAI, Claude, Gemini).
+3. Validating that the necessary API keys are present at startup.
+4. Persisting user setup changes back to the .env file.
+================================================================================
+"""
 
 import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ── Load .env from the project root ──────────────────────────
+# ------------------------------------------------------------------------------
+# PATH RESOLUTION
+# ------------------------------------------------------------------------------
+# We locate the .env in the project root to ensure consistency across 
+# different execution environments (IDE vs Terminal).
 _project_root = Path(__file__).resolve().parent
 _env_path = _project_root / ".env"
 
 
 def reload_env():
     """
-    Re-reads the .env file and refreshes all module-level config vars.
-    Call this after the setup dialog writes new keys to .env.
+    Force-reloads the environment from the .env file.
+    Must be called after the Setup Dialog updates user credentials.
     """
     global LLM_PROVIDER, OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY
-    global MURF_API_KEY, MURF_VOICE_ID, OPENAI_MODEL, LLM_MODEL
+    global MURF_API_KEY, MURF_VOICE_ID, LLM_MODEL
 
+    # Override=True allows fresh values to replace existing environment vars
     load_dotenv(_env_path, override=True)
 
+    # Core environment descriptors
     LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower().strip()
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -33,12 +45,17 @@ def reload_env():
     MURF_API_KEY = os.getenv("MURF_API_KEY", "")
     MURF_VOICE_ID = os.getenv("MURF_VOICE_ID", "en-IN-isha")
 
-    # Set the active model based on provider
+    # Recalculate default models for the new provider
     LLM_MODEL = _get_default_model(LLM_PROVIDER)
 
 
 def _get_default_model(provider: str) -> str:
-    """Returns the default model name for the given provider."""
+    """
+    Returns the optimized default model for the selected AI provider.
+    
+    Args:
+        provider (str): openai, claude, or gemini.
+    """
     models = {
         "openai": "gpt-4o",
         "claude": "claude-sonnet-4-20250514",
@@ -47,58 +64,67 @@ def _get_default_model(provider: str) -> str:
     return models.get(provider, "gpt-4o")
 
 
-# ── Initial load ─────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# INITIAL BOOTSTRAPPING
+# ------------------------------------------------------------------------------
+# We attempt to load the .env once during the module import.
 if _env_path.exists():
     load_dotenv(_env_path)
 else:
-    print(f"[CONFIG] WARNING: .env file not found at {_env_path}")
-    print("[CONFIG] Create a .env file with your API keys. See README.md for details.")
+    # Gentle warning as the Setup Dialog will handle missing .env files later.
+    print(f"[CONFIG] NOTICE: .env sequence not detected at {_env_path}.")
 
-# ── LLM Provider Selection ──────────────────────────────────
+# ------------------------------------------------------------------------------
+# APPLICATION-LEVEL CONFIGURATIONS
+# ------------------------------------------------------------------------------
+
+# Provider & API Keys
 LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai").lower().strip()
-
-# ── API Keys ─────────────────────────────────────────────────
 OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 MURF_API_KEY: str = os.getenv("MURF_API_KEY", "")
 MURF_VOICE_ID: str = os.getenv("MURF_VOICE_ID", "en-IN-isha")
 
-# ── LLM Settings ────────────────────────────────────────────
+# LLM Behavior Settings (Shared across providers)
 LLM_MODEL: str = _get_default_model(LLM_PROVIDER)
-OPENAI_MODEL: str = "gpt-4o"                  # kept for backward compat
+OPENAI_MODEL: str = "gpt-4o"  # Pre-multi-provider constant (maintained for compat)
 OPENAI_MAX_TOKENS: int = 300
 OPENAI_TEMPERATURE: float = 0.7
+MAX_CONVERSATION_HISTORY: int = 20  # Total messages (10 turn-pairs)
 
-MAX_CONVERSATION_HISTORY: int = 20             # Keep last 20 messages
-
-# ── Murf TTS Settings ───────────────────────────────────────
+# Murf TTS Fidelity Settings
 MURF_MODEL_VERSION: str = "GEN2"
 MURF_STYLE: str = "Conversational"
 MURF_SAMPLE_RATE: int = 24000
 MURF_FORMAT: str = "MP3"
 
-# ── Audio Paths ──────────────────────────────────────────────
+# Temp File Management
 AUDIO_DIR: Path = _project_root / "audio"
 TEMP_AUDIO_FILE: Path = AUDIO_DIR / "temp_response.mp3"
 
-# ── Provider display names ───────────────────────────────────
+# Human-Readable Labels for the GUI
 PROVIDER_NAMES = {
     "openai": "OpenAI (GPT-4o)",
     "claude": "Claude (Anthropic)",
-    "gemini": "Gemini (Google)",
+    "gemini": "Gemini (Google Science)",
 }
 
 
 def _is_placeholder(key: str) -> bool:
-    """Check if an API key is a placeholder / empty."""
-    placeholders = {"", "sk-your-key-here", "ap-your-key-here",
-                    "sk-...", "sk-...BbIA"}
+    """
+    Checks if a credential string is a dummy value or whitespace.
+    Uses common placeholder patterns from documentation.
+    """
+    placeholders = {"", "sk-your-key-here", "ap-your-key-here", "sk-...", "sk-...BbIA"}
     return key.strip() in placeholders
 
 
 def get_active_llm_key() -> str:
-    """Returns the API key for the currently selected LLM provider."""
+    """
+    Extracts the API key specific to the currently active LLM provider.
+    Used for initializing AI client libraries on-demand.
+    """
     keys = {
         "openai": OPENAI_API_KEY,
         "claude": ANTHROPIC_API_KEY,
@@ -109,8 +135,8 @@ def get_active_llm_key() -> str:
 
 def has_valid_llm_key() -> bool:
     """
-    Returns True if the selected LLM provider has a non-placeholder key set.
-    Used to decide whether to show the setup dialog.
+    Confirms if the system has a functional AI brain configured.
+    Used by the main orchestrator to trigger the Setup Dialog.
     """
     key = get_active_llm_key()
     return not _is_placeholder(key)
@@ -118,123 +144,110 @@ def has_valid_llm_key() -> bool:
 
 def validate_config() -> bool:
     """
-    Validates that the selected LLM provider's key and Murf key are set.
-    Returns True if valid, prints errors and returns False otherwise.
+    Validates the entire configuration stack.
+    
+    Critical Path: An LLM key must be present.
+    Warning Path: Murf key absence triggers fallback (robotic) voice.
+    
+    Returns:
+        bool: True if critical systems are ready, False otherwise.
     """
     errors = []
 
-    # Validate the active LLM provider's key
+    # Check the bridge to the LLM
     key = get_active_llm_key()
     if _is_placeholder(key):
-        provider_name = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER)
-        errors.append(
-            f"{provider_name} API key is not set. "
-            f"Run JARVIS again or use --setup to configure it."
-        )
+        display = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER.upper())
+        errors.append(f"{display} credentials are missing or invalid.")
 
-    if not MURF_API_KEY or MURF_API_KEY == "ap-your-key-here":
-        errors.append(
-            "MURF_API_KEY is not set. Get yours at https://murf.ai/resources/api\n"
-            "         (TTS will fall back to offline pyttsx3 voice)"
-        )
+    # Check the bridge to premium voice
+    if _is_placeholder(MURF_API_KEY):
+        errors.append("MURF_API_KEY is missing. JARVIS will use offline fallback voice.")
 
     if errors:
         print("\n" + "=" * 60)
-        print("  JARVIS — CONFIGURATION ERROR")
+        print("  JARVIS — CONFIGURATION WARNING / ERROR")
         print("=" * 60)
         for err in errors:
-            print(f"  ✗ {err}")
-        print()
-        print("  Fix: Run with --setup or edit .env in the project root.")
-        print("=" * 60 + "\n")
-        # Only the LLM key is truly critical
+            print(f"  X {err}")
+        print("-" * 60)
+        
+        # If the LLM is gone, Jarvis is brainless and cannot start.
         if _is_placeholder(get_active_llm_key()):
             return False
 
-    # Ensure audio directory exists
+    # Ensure the audio landing-zone exists
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-
     return True
 
 
-def save_to_env(provider: str, api_key: str, murf_key: str = "",
-                murf_voice: str = "") -> None:
+def save_to_env(provider: str, api_key: str, murf_key: str = "", murf_voice: str = "") -> None:
     """
-    Writes/updates the .env file with the given provider and keys.
-    Preserves any existing keys not being changed.
+    Serializes configuration changes back to the .env file.
+    This maintains persistence through reboot and ensures a sleek UX.
+    
+    Args:
+        provider: 'openai', 'claude', or 'gemini'
+        api_key: The developer key for the selected provider
+        murf_key: (Optional) The Murf.ai API key
+        murf_voice: (Optional) The desired Murf voice ID (e.g., en-IN-isha)
     """
-    # Read existing .env content (if any)
-    existing = {}
+    # 1. Read the current .env into memory
+    current_vars = {}
     if _env_path.exists():
         with open(_env_path, "r", encoding="utf-8") as f:
             for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
+                if line.strip() and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
-                    existing[k.strip()] = v.strip()
+                    current_vars[k.strip()] = v.strip()
 
-    # Update with new values
-    existing["LLM_PROVIDER"] = provider.lower().strip()
+    # 2. Inject the updated configuration
+    current_vars["LLM_PROVIDER"] = provider.lower().strip()
 
-    # Set the key for the selected provider
-    key_map = {
-        "openai": "OPENAI_API_KEY",
-        "claude": "ANTHROPIC_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-    }
-    env_key_name = key_map.get(provider.lower().strip(), "OPENAI_API_KEY")
-    existing[env_key_name] = api_key.strip()
+    # Determine which API key variable name should receive the new key
+    key_mapping = {"openai": "OPENAI_API_KEY", "claude": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
+    env_target = key_mapping.get(provider.lower().strip(), "OPENAI_API_KEY")
+    current_vars[env_target] = api_key.strip()
 
-    if murf_key:
-        existing["MURF_API_KEY"] = murf_key.strip()
-    if murf_voice:
-        existing["MURF_VOICE_ID"] = murf_voice.strip()
+    if murf_key: current_vars["MURF_API_KEY"] = murf_key.strip()
+    if murf_voice: current_vars["MURF_VOICE_ID"] = murf_voice.strip()
 
-    # Write the .env file with nice comments
+    # 3. Serialize back to disk with professional formatting
+    header = (
+        "# ============================================================\n"
+        "# JARVIS — API Keys Configuration\n"
+        "# ============================================================\n"
+        "# DO NOT COMMIT TO PUBLIC REPOSITORIES\n"
+        "# ============================================================\n\n"
+    )
+
     with open(_env_path, "w", encoding="utf-8") as f:
-        f.write("# ============================================================\n")
-        f.write("# JARVIS — API Keys Configuration\n")
-        f.write("# ============================================================\n")
-        f.write("# Auto-generated by JARVIS setup. NEVER commit to GitHub!\n")
-        f.write("# ============================================================\n\n")
+        f.write(header)
+        f.write(f"LLM_PROVIDER={current_vars.get('LLM_PROVIDER', 'openai')}\n\n")
+        f.write(f"OPENAI_API_KEY={current_vars.get('OPENAI_API_KEY', '')}\n\n")
+        f.write(f"ANTHROPIC_API_KEY={current_vars.get('ANTHROPIC_API_KEY', '')}\n\n")
+        f.write(f"GEMINI_API_KEY={current_vars.get('GEMINI_API_KEY', '')}\n\n")
+        f.write(f"MURF_API_KEY={current_vars.get('MURF_API_KEY', '')}\n\n")
+        f.write(f"MURF_VOICE_ID={current_vars.get('MURF_VOICE_ID', 'en-IN-isha')}\n")
 
-        f.write(f"# LLM Provider: openai, claude, or gemini\n")
-        f.write(f"LLM_PROVIDER={existing.get('LLM_PROVIDER', 'openai')}\n\n")
-
-        f.write(f"# OpenAI GPT-4o API Key\n")
-        f.write(f"OPENAI_API_KEY={existing.get('OPENAI_API_KEY', '')}\n\n")
-
-        f.write(f"# Anthropic Claude API Key\n")
-        f.write(f"ANTHROPIC_API_KEY={existing.get('ANTHROPIC_API_KEY', '')}\n\n")
-
-        f.write(f"# Google Gemini API Key\n")
-        f.write(f"GEMINI_API_KEY={existing.get('GEMINI_API_KEY', '')}\n\n")
-
-        f.write(f"# Murf AI Text-to-Speech API Key\n")
-        f.write(f"MURF_API_KEY={existing.get('MURF_API_KEY', '')}\n\n")
-
-        f.write(f"# Murf Voice ID\n")
-        f.write(f"MURF_VOICE_ID={existing.get('MURF_VOICE_ID', 'en-IN-isha')}\n")
-
-    print(f"[CONFIG] Saved configuration to {_env_path}")
+    print(f"[CONFIG] Environment updated and serialized to disk.")
 
 
-# ── Quick self-test when run directly ────────────────────────
+# ------------------------------------------------------------------------------
+# SELF-DIAGNOSTIC (When run as a script)
+# ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("[CONFIG] Testing configuration loader...")
-    print(f"  Project Root  : {_project_root}")
-    print(f"  .env Path     : {_env_path} ({'EXISTS' if _env_path.exists() else 'MISSING'})")
-    print(f"  LLM Provider  : {LLM_PROVIDER}")
-    print(f"  LLM Model     : {LLM_MODEL}")
-    print(f"  OpenAI Key    : {'SET' if not _is_placeholder(OPENAI_API_KEY) else 'NOT SET'}")
-    print(f"  Claude Key    : {'SET' if not _is_placeholder(ANTHROPIC_API_KEY) else 'NOT SET'}")
-    print(f"  Gemini Key    : {'SET' if not _is_placeholder(GEMINI_API_KEY) else 'NOT SET'}")
-    print(f"  Murf Key      : {'SET' if MURF_API_KEY and MURF_API_KEY != 'ap-your-key-here' else 'NOT SET'}")
-    print(f"  Murf Voice    : {MURF_VOICE_ID}")
-    print(f"  Audio Dir     : {AUDIO_DIR}")
-
+    print("-" * 60)
+    print(" JARVIS Configuration Logic — Core Diagnostics")
+    print("-" * 60)
+    print(f"  Working Path  : {_project_root}")
+    print(f"  Active Brain  : {LLM_PROVIDER.upper()}")
+    print(f"  Brain Key Check: {'[VALID]' if has_valid_llm_key() else '[MISSING]'}")
+    print(f"  Murf Key Check: {'[VALID]' if not _is_placeholder(MURF_API_KEY) else '[MISSING]'}")
+    print("-" * 60)
+    
     if validate_config():
-        print("\n  ✓ Configuration is valid. Ready to launch JARVIS.")
+        print("  STATUS: SYSTEM READY. Launch main.py to begin.")
     else:
-        print("\n  ✗ Configuration has errors. Fix them before running.")
+        print("  STATUS: CRITICAL FAILURE. Use --setup to resolve.")
         sys.exit(1)

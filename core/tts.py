@@ -1,18 +1,25 @@
-# ============================================================
-# JARVIS — Text-to-Speech Module (core/tts.py)
-# ============================================================
-# Converts text to speech using Murf Falcon API (primary)
-# with pyttsx3 as a local fallback. Handles audio download
-# and playback via pygame.
-# ============================================================
+"""
+================================================================================
+JARVIS — Text-to-Speech Module (core/tts.py)
+================================================================================
+The Voice Layer: Cloud & Offline Speech Generation
+
+Jarvis speaks through a hybrid two-tier TTS system:
+1. Primary (Murf Falcon): High-fidelity, emotional AI voices via cloud API.
+2. Fallback (pyttsx3): Local, offline, 'robotic' voice if the internet 
+   or API keys are unavailable.
+
+Audio feedback is rendered through the Pygame-CE mixer for smooth playback.
+================================================================================
+"""
 
 import os
 import re
 import time
 import requests
-
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import (
@@ -26,291 +33,213 @@ from config import (
     AUDIO_DIR,
 )
 
-# -- Pygame Initialization ----------------------------------------
+# ------------------------------------------------------------------------------
+# AUDIO DRIVER (PYGAME)
+# ------------------------------------------------------------------------------
+# Pygame's mixer is the most reliable way to play MP3 streams in Python
+# while maintaining the ability to check 'get_busy()' during playback.
 _pygame_available = False
 try:
     import pygame
+    # Initializing with voice-specific frequency (Murf default is 24kHz)
     pygame.mixer.init(frequency=24000, size=-16, channels=1)
     _pygame_available = True
 except Exception as e:
-    print(f"[TTS] WARNING: pygame mixer init failed: {e}")
-    print("[TTS] Audio playback will NOT work.")
+    print(f"[TTS] Driver Warning: Pygame mixer init failed ({e}). Audio disabled.")
 
-# -- pyttsx3 Fallback ---------------------------------------------
+# ------------------------------------------------------------------------------
+# FALLBACK ENGINE (PYTTSX3)
+# ------------------------------------------------------------------------------
+# An offline SAPI5/NSSS engine that works without internet or API keys.
 _pyttsx3_available = False
 _pyttsx3_engine = None
 try:
     import pyttsx3
     _pyttsx3_engine = pyttsx3.init()
-    if _pyttsx3_engine is None:
-        raise RuntimeError("pyttsx3.init() returned None")
-    _pyttsx3_engine.setProperty('rate', 170)    # Slightly slower for clarity
-    _pyttsx3_engine.setProperty('volume', 1.0)
-    _pyttsx3_available = True
+    if _pyttsx3_engine:
+        # Configuring for better clarity
+        _pyttsx3_engine.setProperty('rate', 170)
+        _pyttsx3_engine.setProperty('volume', 1.0)
+        _pyttsx3_available = True
 except Exception as e:
-    _pyttsx3_engine = None
-    print(f"[TTS] WARNING: pyttsx3 init failed: {e}")
-    print("[TTS] Local fallback TTS will not be available.")
+    print(f"[TTS] Fallback Warning: pyttsx3 init failed ({e}). Offline voice disabled.")
 
-# -- Mute state ---------------------------------------------------
+# Global Mute State (Toggled by GUI)
 _muted = False
 
 
 def get_tts_status() -> str:
     """
-    Returns a clear string describing which TTS engine is active.
-    Call at startup so the user knows what voice they will hear.
+    Determines the current active speech strategy based on available resources.
+    
+    Returns:
+        str: A descriptive status for display in the terminal or GUI.
     """
-    has_murf_key = bool(MURF_API_KEY and MURF_API_KEY != "ap-your-key-here")
+    has_murf = bool(MURF_API_KEY and len(MURF_API_KEY) > 10)
 
-    if has_murf_key and _pygame_available:
-        return (f"[TTS] ACTIVE ENGINE: Murf Falcon (GEN2) | Voice: {MURF_VOICE_ID}\n"
-                f"[TTS] Fallback: {'pyttsx3 (offline)' if _pyttsx3_available else 'text-only (no fallback)'}")
+    if has_murf and _pygame_available:
+        return (f"VOICE: Premium (Murf-API) | Speaker: {MURF_VOICE_ID}\n"
+                f"STATUS: Systems Optimal")
     elif _pyttsx3_available:
-        reason = "Missing MURF_API_KEY" if not has_murf_key else "pygame not available"
-        return (f"[TTS] WARNING: Using OFFLINE pyttsx3 voice (robotic). Reason: {reason}\n"
-                f"[TTS] To use Murf Falcon, fix the issue above and restart.")
+        return ("VOICE: Fallback (Offline-OS)\n"
+                "STATUS: Missing credentials or internet")
     else:
-        return ("[TTS] CRITICAL: No TTS engine available! Voice will be TEXT-ONLY.\n"
-                "[TTS] Install pygame-ce and add MURF_API_KEY to .env")
+        return ("VOICE: Text-Only\n"
+                "STATUS: NO AUDIO DRIVERS INSTALLED")
 
 
 def set_muted(muted: bool) -> None:
-    """Enable or disable audio output."""
+    """External hook for the GUI to toggle audio output."""
     global _muted
     _muted = muted
-    print(f"[TTS] Audio {'muted' if muted else 'unmuted'}")
+    print(f"[TTS] Audio output {'silenced' if muted else 'restored'}.")
 
 
 def is_muted() -> bool:
-    """Check if audio is currently muted."""
+    """Checks if audio is currently suppressed."""
     return _muted
 
 
 def _clean_for_tts(text: str) -> str:
     """
-    Strips any remaining action tags and cleans text for TTS.
+    Removes system action tags before text is read aloud.
+    Prevents Jarvis from saying things like "bracket action open url bracket".
     """
-    # Remove all [ACTION:...], [REMINDER:...], [SCHEDULE:...] tags
     cleaned = re.sub(r'\[(?:ACTION|REMINDER|SCHEDULE):[^\]]*\]', '', text)
-    # Remove multiple spaces
     cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
     return cleaned
 
 
 def _speak_murf(text: str) -> bool:
     """
-    Sends text to Murf Falcon API and plays the returned audio.
-
-    Returns True if successful, False if failed (so we can fallback).
+    POSTs text to Murf.ai, downloads the MP3 result, and plays it.
+    
+    Returns:
+        bool: True if the entire cloud pipeline succeeded.
     """
-    # Ensure audio directory exists
     AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-    # ── API Request ──────────────────────────────────────────
+    # 1. API Synthesis Request
     url = "https://api.murf.ai/v1/speech/generate"
-    headers = {
-        "Content-Type": "application/json",
-        "api-key": MURF_API_KEY,
-    }
+    headers = {"Content-Type": "application/json", "api-key": MURF_API_KEY}
     payload = {
-        "voiceId": MURF_VOICE_ID,
-        "style": MURF_STYLE,
-        "text": text,
-        "modelVersion": MURF_MODEL_VERSION,
-        "format": MURF_FORMAT,
-        "sampleRate": MURF_SAMPLE_RATE,
-        "channelType": "MONO",
-        "rate": 0,
-        "pitch": 0,
+        "voiceId": MURF_VOICE_ID, "style": MURF_STYLE, "text": text,
+        "modelVersion": MURF_MODEL_VERSION, "format": MURF_FORMAT,
+        "sampleRate": MURF_SAMPLE_RATE, "channelType": "MONO"
     }
 
     try:
-        print("🔊 Generating speech via Murf Falcon...")
+        print("🔊 [TTS] Synthesis: Sending text to Murf AI...")
         response = requests.post(url, json=payload, headers=headers, timeout=30)
+        if response.status_code != 200: return False
 
-        if response.status_code != 200:
-            print(f"[TTS] Murf API error {response.status_code}: {response.text}")
-            return False
+        audio_url = response.json().get("audioFile")
+        if not audio_url: return False
 
-        data = response.json()
-        audio_url = data.get("audioFile")
-
-        if not audio_url:
-            print(f"[TTS] Murf response missing audioFile: {data}")
-            return False
-
-        # ── Download the audio file ──────────────────────────
-        print("📥 Downloading audio...")
+        # 2. Synchronous Buffer Download
+        print("📥 [TTS] Protocol: Downloading interactive speech buffer...")
         audio_response = requests.get(audio_url, timeout=30)
+        if audio_response.status_code != 200: return False
 
-        if audio_response.status_code != 200:
-            print(f"[TTS] Audio download failed: {audio_response.status_code}")
-            return False
-
-        # Save to temp file
+        # 3. Persistence & Playback
         audio_path = str(TEMP_AUDIO_FILE)
         with open(audio_path, "wb") as f:
             f.write(audio_response.content)
 
-        # -- Play the audio ----------------------------------------
         if _pygame_available:
-            played = _play_with_pygame(audio_path)
-            if not played:
-                return False  # triggers pyttsx3 fallback
-        else:
-            print("[TTS] pygame not available. Cannot play audio.")
-            return False
-
-        # ── Cleanup ──────────────────────────────────────────
-        try:
-            os.remove(audio_path)
-        except OSError:
-            pass  # File might still be in use
-
-        return True
-
-    except requests.exceptions.Timeout:
-        print("[TTS] Murf API request timed out.")
+            return _play_with_pygame(audio_path)
         return False
-    except requests.exceptions.ConnectionError:
-        print("[TTS] Cannot connect to Murf API. Check internet connection.")
-        return False
+
     except Exception as e:
-        print(f"[TTS] Murf TTS error: {e}")
+        print(f"[TTS] Premium Pipeline Glitch: {e}")
         return False
 
 
 def _play_with_pygame(audio_path: str) -> bool:
     """
-    Plays an MP3 file using pygame.mixer and waits until it finishes.
-    This is the BLOCKING playback loop required by the spec.
-
-    Returns True if playback succeeded, False if it failed.
+    Renders audio file through the OS speakers and blocks until done.
+    
+    CRITICAL: This blocking is what prevents Jarvis from hearing himself!
     """
     try:
         pygame.mixer.music.load(audio_path)
         pygame.mixer.music.play()
 
-        print("[TTS] Speaking...")
-
-        # CRITICAL: Block until audio finishes playing
-        # This prevents the microphone from recording Jarvis's own voice
+        # Monitoring loop: Wait for audio stream to reach EOF
         clock = pygame.time.Clock()
         while pygame.mixer.music.get_busy():
-            clock.tick(10)  # Check 10 times per second
+            clock.tick(10)  # Pulse check 10 times per second
 
-        # Small buffer to ensure clean completion
+        # Anti-aliasing silence buffer
         time.sleep(0.2)
         return True
-
     except Exception as e:
-        print(f"[TTS] Pygame playback error: {e}")
+        print(f"[TTS] Playback Error: {e}")
         return False
 
 
 def _speak_pyttsx3(text: str) -> bool:
-    """
-    Fallback: speaks text using pyttsx3 (local, offline TTS).
-    Returns True if successful, False otherwise.
-    """
-    global _pyttsx3_engine, _pyttsx3_available
-
-    if not _pyttsx3_available:
+    """Local OS voice engine (no internet required)."""
+    global _pyttsx3_engine
+    if not _pyttsx3_available or not _pyttsx3_engine:
         return False
 
-    # Defensive: re-init if engine was garbage-collected or went stale
-    if _pyttsx3_engine is None:
-        try:
-            _pyttsx3_engine = pyttsx3.init()
-            if _pyttsx3_engine is None:
-                raise RuntimeError("pyttsx3.init() returned None on re-init")
-            _pyttsx3_engine.setProperty('rate', 170)
-            _pyttsx3_engine.setProperty('volume', 1.0)
-        except Exception as e:
-            print(f"[TTS] pyttsx3 re-init failed: {e}")
-            _pyttsx3_available = False
-            return False
-
     try:
-        print("🔊 Speaking via local TTS (fallback)...")
+        print("🔊 [TTS] Legacy fallback: Accessing system voices...")
         _pyttsx3_engine.say(text)
-        _pyttsx3_engine.runAndWait()
+        _pyttsx3_engine.runAndWait() # Synchronous play
         return True
     except Exception as e:
-        print(f"[TTS] pyttsx3 error: {e}")
-        # Engine is broken — clear it so next call attempts re-init
-        _pyttsx3_engine = None
+        print(f"[TTS] Legacy engine failed: {e}")
         return False
 
 
 def speak(text: str, status_callback=None) -> None:
     """
-    Main TTS function. Converts text to speech and plays it.
-
-    Pipeline:
-      1. Clean text (remove action tags)
-      2. Try Murf Falcon API (primary)
-      3. If Murf fails, fall back to pyttsx3 (local)
-      4. If both fail, print the text to console
-
-    Args:
-        text: The text to speak.
-        status_callback: Optional function(status_str) for GUI updates.
+    The unified public interface for all Jarvis speech.
+    Automatically handles cleaning, muting, and failover logic.
     """
-    if not text or not text.strip():
-        return
+    if not text or not text.strip(): return
 
-    # Clean the text for TTS
-    clean_text = _clean_for_tts(text)
-    if not clean_text:
-        return
+    # Cleanup logic
+    speech_text = _clean_for_tts(text)
+    if not speech_text: return
 
-    # Check mute
+    # Suppression logic
     if _muted:
-        print(f"🔇 [MUTED] Jarvis: {clean_text}")
+        print(f"🔇 [SILENCED] Jarvis: {speech_text}")
         return
 
-    if status_callback:
-        status_callback("Speaking...")
+    if status_callback: status_callback("Speaking...")
 
-    # Try Murf Falcon first (primary TTS)
-    success = _speak_murf(clean_text)
+    # Strategy 1: Premium API
+    success = _speak_murf(speech_text)
 
+    # Strategy 2: Local Fallback
     if not success:
-        print("[TTS] Murf failed. Trying local fallback...")
-        success = _speak_pyttsx3(clean_text)
+        print("[TTS] Cloud failover — switching to local OS voice engine.")
+        success = _speak_pyttsx3(speech_text)
 
+    # Strategy 3: Visual Only
     if not success:
-        # Last resort: just print it
-        print(f"\n💬 Jarvis (text-only): {clean_text}\n")
+        print(f"\n💬 [SILENT] Jarvis: {speech_text}\n")
 
-    if status_callback:
-        status_callback("Ready")
+    if status_callback: status_callback("Online")
 
 
 def speak_startup_greeting(status_callback=None) -> None:
-    """
-    Speaks the startup greeting when JARVIS boots up.
-    """
-    greeting = "Good to have you back, Bro. All systems are online. What do we need today?"
+    """Standardized boot-up sequence audio."""
+    greeting = "Systems verified. Good to have you back, Bro. How can I assist you today?"
     speak(greeting, status_callback)
 
 
-# ── Self-test ────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# MODULE TESTING
+# ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  JARVIS TTS — Audio Test")
-    print("=" * 50)
-    print(f"  Murf Voice : {MURF_VOICE_ID}")
-    print(f"  Murf Model : {MURF_MODEL_VERSION}")
-    print(f"  Pygame     : {'Available' if _pygame_available else 'Not Available'}")
-    print(f"  pyttsx3    : {'Available' if _pyttsx3_available else 'Not Available'}")
-    print()
-
-    test_text = "Hello Bro. This is a test of the JARVIS voice system. All systems are functioning normally."
-    print(f"  Test text: \"{test_text}\"")
-    print()
-
-    speak(test_text)
-    print("\n  ✓ TTS test complete.")
+    print("-" * 60)
+    print(" JARVIS Speech Stack — Diagnostic")
+    print("-" * 60)
+    print(get_tts_status())
+    print("-" * 60)
+    speak("Diagnostic test initiated. Audio frequency: 0.1 Megahertz.")

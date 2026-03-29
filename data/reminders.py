@@ -1,154 +1,83 @@
-# ============================================================
-# JARVIS — Reminders Data Module (data/reminders.py)
-# ============================================================
-# In-memory reminder store with auto-incrementing IDs.
-# Data lives only for the current session.
-# In a future version, this would use SQLite for persistence.
-# ============================================================
+"""
+================================================================================
+JARVIS — Reminders Store (data/reminders.py)
+================================================================================
+The Ephemeral Memory Bank for Short-Term Tasks.
 
-import json
+This module provides an ID-trackable store for reminders set by voice.
+Unlike the Schedule (which is time-rigid), Reminders are flexible tasks 
+associated with a time and date.
+
+Logic:
+1. Auto-incrementing IDs for easy voice-deletion ("Delete reminder number 2").
+2. JSON-serializable output for AI context injection.
+================================================================================
+"""
+
 from typing import List, Dict, Optional
 
-# ── In-memory store ──────────────────────────────────────────
+# Global sensory storage
 _reminders: List[Dict] = []
-_next_id: int = 1
+_id_counter: int = 1
 
 
 def add_reminder(task: str, time: str, date: str = "today") -> Dict:
     """
-    Adds a new reminder.
-
+    Registers a new task into the assistant's memory.
+    
     Args:
-        task: What to remind about (e.g., "Call Rahul")
-        time: When (e.g., "7:00 PM")
-        date: Date string (e.g., "today", "tomorrow", "Monday")
-
-    Returns:
-        The newly created reminder dict with its assigned ID.
+        task: Description of the duty.
+        time: Human-relative or specific time.
+        date: Day reference.
     """
-    global _next_id
-
-    reminder = {
-        "id": _next_id,
+    global _id_counter
+    
+    entry = {
+        "id": _id_counter,
         "task": task.strip(),
         "time": time.strip(),
         "date": date.strip(),
     }
-
-    _reminders.append(reminder)
-    _next_id += 1
-
-    print(f"[REMINDERS] Added #{reminder['id']}: {task} at {time} ({date})")
-    return reminder
+    
+    _reminders.append(entry)
+    _id_counter += 1
+    
+    print(f"[DATA] Neural Write: Set Reminder #{entry['id']} for {task}.")
+    return entry
 
 
 def get_reminders() -> List[Dict]:
-    """
-    Returns all current reminders as a list of dicts.
-    Each dict has keys: 'id', 'task', 'time', 'date'.
-    """
+    """Returns the current active task list."""
     return _reminders.copy()
 
 
-def get_reminder_by_id(reminder_id: int) -> Optional[Dict]:
+def purge_reminder(id_to_delete: int) -> bool:
     """
-    Returns a specific reminder by its ID.
-
-    Args:
-        reminder_id: The reminder's unique ID.
-
-    Returns:
-        The reminder dict, or None if not found.
-    """
-    for reminder in _reminders:
-        if reminder["id"] == reminder_id:
-            return reminder.copy()
-    return None
-
-
-def delete_reminder(reminder_id: int) -> bool:
-    """
-    Deletes a reminder by its ID.
-
-    Args:
-        reminder_id: The reminder's unique ID.
-
-    Returns:
-        True if the reminder was deleted, False if not found.
+    Locates and removes a task by its ID number.
+    Used when the user says "Jarvis, delete reminder two."
     """
     global _reminders
-
-    original_length = len(_reminders)
-    _reminders = [r for r in _reminders if r["id"] != reminder_id]
-
-    deleted = len(_reminders) < original_length
-    if deleted:
-        print(f"[REMINDERS] Deleted reminder #{reminder_id}")
-    else:
-        print(f"[REMINDERS] Reminder #{reminder_id} not found")
-    return deleted
+    initial = len(_reminders)
+    _reminders = [r for r in _reminders if r["id"] != id_to_delete]
+    
+    success = len(_reminders) < initial
+    if success: print(f"[DATA] Neural Write: Purged Record #{id_to_delete}.")
+    return success
 
 
-def clear_reminders() -> int:
-    """
-    Clears all reminders.
-
-    Returns:
-        Number of reminders that were cleared.
-    """
-    global _reminders, _next_id
-
-    count = len(_reminders)
+def clear_system_memory() -> None:
+    """Resets the entire reminder store."""
+    global _reminders, _id_counter
     _reminders = []
-    _next_id = 1
-
-    print(f"[REMINDERS] Cleared all {count} reminders.")
-    return count
+    _id_counter = 1
 
 
-def get_reminders_count() -> int:
-    """Returns the number of active reminders."""
-    return len(_reminders)
+def get_text_summary() -> str:
+    """Returns a bulleted list for the GUI or Terminal logs."""
+    if not _reminders: return " (No pending tasks detected)"
+    return "\n".join([f"• #{r['id']} {r['task']} @ {r['time']}" for r in _reminders])
 
 
-def get_reminders_summary() -> str:
-    """
-    Returns a human-readable summary of all reminders.
-    Useful for terminal display and debugging.
-    """
-    if not _reminders:
-        return "  No reminders set."
-
-    lines = []
-    for r in _reminders:
-        lines.append(f"  #{r['id']}  {r['task']:.<30} {r['time']:>8}  ({r['date']})")
-    return "\n".join(lines)
-
-
-# ── Self-test ────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("=" * 50)
-    print("  JARVIS Reminders — Test")
-    print("=" * 50)
-
-    # Add some test reminders
-    add_reminder("Call Rahul", "7:00 PM", "today")
-    add_reminder("Submit assignment", "9:00 PM", "today")
-    add_reminder("Buy groceries", "10:00 AM", "tomorrow")
-
-    print(f"\n  Total reminders: {get_reminders_count()}")
-    print(f"\n{get_reminders_summary()}")
-
-    # Delete one
-    print()
-    delete_reminder(2)
-    print(f"\n  After deletion: {get_reminders_count()} reminders")
-    print(f"\n{get_reminders_summary()}")
-
-    # JSON output (what goes to GPT-4o)
-    print(f"\n  JSON:\n{json.dumps(get_reminders(), indent=2)}")
-
-    # Clear all
-    print()
-    clear_reminders()
-    print(f"  After clear: {get_reminders_count()} reminders")
+    add_reminder("Execute Neural Patch", "18:00")
+    print(get_text_summary())

@@ -1,62 +1,66 @@
-# ============================================================
-# JARVIS — GUI Module (ui/gui.py)
-# ============================================================
-# Premium dark-themed tkinter interface with:
-#   - Scrollable chat log (user + Jarvis messages)
-#   - Status indicator (Listening, Thinking, Speaking, Ready)
-#   - Schedule panel on the right
-#   - Mute toggle button
-#   - Runs the agent loop in a background thread
-# ============================================================
+"""
+================================================================================
+JARVIS — Graphical User Interface (ui/gui.py)
+================================================================================
+A Premium, Dark-Themed Tkinter Dashboard for the AI Assistant.
+
+Features:
+1. Threaded Execution: The Voice Agent runs in a background daemon thread, 
+   preventing the GUI from freezing during API requests.
+2. Real-time Log: Color-coded chat history with timestamps.
+3. Live Schedule: Sidebar that automatically refreshes to show current events.
+4. Dynamic Status: Visual indicators for Listening, Thinking, and Speaking.
+5. Audio Control: Master mute toggle directly linked to the TTS engine.
+================================================================================
+"""
 
 import sys
 import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import scrolledtext, font as tkfont
-
 from pathlib import Path
+
+# Path-safety shim
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from data.schedule import get_schedule, get_schedule_summary
+from data.schedule import get_schedule
 from data.reminders import get_reminders
 from core.tts import set_muted, is_muted
 
-# -- Cross-platform font selection ---------------------------------
+# ------------------------------------------------------------------------------
+# THEME CONFIGURATION (Aesthetics)
+# ------------------------------------------------------------------------------
 _FONT_SANS = "Segoe UI" if sys.platform == "win32" else "Helvetica"
 _FONT_MONO = "Consolas" if sys.platform == "win32" else "Courier"
 
-# ═══════════════════════════════════════════════════════════════
-# COLOUR PALETTE — Premium Dark Theme
-# ═══════════════════════════════════════════════════════════════
 COLORS = {
-    "bg_dark":        "#0a0a0f",       # Main background (near black)
-    "bg_panel":       "#111118",       # Panel background
-    "bg_chat":        "#0d0d14",       # Chat area background
-    "bg_input":       "#16161f",       # Input area background
-    "accent_blue":    "#3b82f6",       # Primary accent (bright blue)
-    "accent_cyan":    "#06b6d4",       # Secondary accent (cyan)
-    "accent_green":   "#10b981",       # Status: ready / success
-    "accent_yellow":  "#f59e0b",       # Status: thinking
-    "accent_red":     "#ef4444",       # Status: error / muted
-    "accent_purple":  "#8b5cf6",       # Status: speaking
-    "accent_orange":  "#f97316",       # Status: listening
-    "text_primary":   "#e2e8f0",       # Main text
-    "text_secondary": "#94a3b8",       # Dim text
-    "text_jarvis":    "#38bdf8",       # Jarvis message color
-    "text_user":      "#a78bfa",       # User message color
-    "border":         "#1e293b",       # Borders
-    "scrollbar":      "#334155",       # Scrollbar
+    "bg_dark":        "#0a0a0f",   # Background: Deep Space
+    "bg_panel":       "#111118",   # Panels: Midnight Blue
+    "bg_chat":        "#0d0d14",   # Chat Box: Dark Obsidian
+    "accent_blue":    "#3b82f6",   # Primary UI: Electric Blue
+    "accent_cyan":    "#06b6d4",   # Sub-UI: Laser Cyan
+    "accent_green":   "#10b981",   # Success: Emerald
+    "accent_yellow":  "#f59e0b",   # Thinking: Amber
+    "accent_red":     "#ef4444",   # Warning: Scarlet
+    "accent_purple":  "#8b5cf6",   # Active: Neon Violet
+    "accent_orange":  "#f97316",   # Active: Plasma Orange
+    "text_primary":   "#e2e8f0",   # High-contrast slate
+    "text_secondary": "#94a3b8",   # Low-contrast slate
+    "text_jarvis":    "#38bdf8",   # Jarvis Bubble: Sky Blue
+    "text_user":      "#a78bfa",   # User Bubble: Lavender
+    "border":         "#1e293b",   # Subtle separators
 }
 
-# Status → color mapping
-STATUS_COLORS = {
+# Mapping cognitive states to UI colors
+STATUS_MAP = {
     "Listening...":    COLORS["accent_orange"],
     "Calibrating...":  COLORS["accent_orange"],
     "Transcribing...": COLORS["accent_yellow"],
     "Thinking...":     COLORS["accent_yellow"],
     "Speaking...":     COLORS["accent_purple"],
     "Ready":           COLORS["accent_green"],
+    "Online":          COLORS["accent_green"],
     "Starting up...":  COLORS["accent_cyan"],
     "Shutting down...": COLORS["accent_red"],
     "Offline":         COLORS["text_secondary"],
@@ -66,402 +70,238 @@ STATUS_COLORS = {
 
 class JarvisGUI:
     """
-    Premium dark-themed tkinter GUI for JARVIS.
-
-    Usage:
-        gui = JarvisGUI()
-        gui.run()  # Blocks — starts mainloop
+    Main Window Class.
+    Manages the layout, thread orchestration, and real-time data binding.
     """
 
     def __init__(self):
-        # ── Root Window ──────────────────────────────────────
+        # -- Window Initialization --
         self.root = tk.Tk()
-        self.root.title("J.A.R.V.I.S. — Voice AI Assistant")
+        self.root.title("J.A.R.V.I.S. — Command Center")
         self.root.geometry("1100x700")
         self.root.minsize(900, 550)
         self.root.configure(bg=COLORS["bg_dark"])
 
-        # Try to set icon (optional)
-        try:
-            self.root.iconbitmap(default='')
-        except Exception:
-            pass
-
-        # -- Custom Fonts (cross-platform) -------------------------
+        # Typography configuration
         self._font_title = tkfont.Font(family=_FONT_SANS, size=18, weight="bold")
         self._font_status = tkfont.Font(family=_FONT_SANS, size=12, weight="bold")
         self._font_chat = tkfont.Font(family=_FONT_MONO, size=11)
         self._font_schedule = tkfont.Font(family=_FONT_SANS, size=10)
         self._font_button = tkfont.Font(family=_FONT_SANS, size=10, weight="bold")
-        self._font_label = tkfont.Font(family=_FONT_SANS, size=9)
+        self._font_small = tkfont.Font(family=_FONT_SANS, size=9)
 
-        # ── Agent reference ──────────────────────────────────
+        # Background Process Management
         self._agent = None
         self._agent_thread = None
 
-        # -- Build the UI ------------------------------------------
+        # Build the Visual Hierarchy
         self._build_header()
-        self._build_main_area()
+        self._build_main_body()
         self._build_footer()
 
-        # -- Handle window close -----------------------------------
+        # Lifecycle Management
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._auto_refresh_loop()
 
-        # -- Auto-refresh schedule every 30 seconds ----------------
-        self._auto_refresh_schedule()
-
-    # ═══════════════════════════════════════════════════════════
-    # UI CONSTRUCTION
-    # ═══════════════════════════════════════════════════════════
+    # --------------------------------------------------------------------------
+    # COMPONENT BUILDERS
+    # --------------------------------------------------------------------------
 
     def _build_header(self):
-        """Top bar with title and status."""
-        header = tk.Frame(self.root, bg=COLORS["bg_panel"], height=70)
+        """Creates the brand bar and high-level status indicator."""
+        header = tk.Frame(self.root, bg=COLORS["bg_panel"], height=80)
         header.pack(fill=tk.X, side=tk.TOP)
         header.pack_propagate(False)
 
-        # Left: Title
-        title_frame = tk.Frame(header, bg=COLORS["bg_panel"])
-        title_frame.pack(side=tk.LEFT, padx=20, pady=10)
+        # LEFT: Identity
+        id_frame = tk.Frame(header, bg=COLORS["bg_panel"])
+        id_frame.pack(side=tk.LEFT, padx=30)
+        
+        tk.Label(id_frame, text="J.A.R.V.I.S.", font=self._font_title, 
+                 fg=COLORS["accent_blue"], bg=COLORS["bg_panel"]).pack(side=tk.LEFT)
+        tk.Label(id_frame, text=" — Systems Live", font=self._font_small, 
+                 fg=COLORS["text_secondary"], bg=COLORS["bg_panel"]).pack(side=tk.LEFT, padx=10, pady=(5,0))
 
-        tk.Label(
-            title_frame,
-            text="J.A.R.V.I.S.",
-            font=self._font_title,
-            fg=COLORS["accent_blue"],
-            bg=COLORS["bg_panel"],
-        ).pack(side=tk.LEFT)
+        # RIGHT: Real-time Status Readout
+        st_frame = tk.Frame(header, bg=COLORS["bg_panel"])
+        st_frame.pack(side=tk.RIGHT, padx=30)
 
-        tk.Label(
-            title_frame,
-            text="  Just A Rather Very Intelligent System",
-            font=self._font_label,
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_panel"],
-        ).pack(side=tk.LEFT, padx=(10, 0), pady=(5, 0))
+        # The glowing status dot
+        self._status_dot = tk.Label(st_frame, text="●", font=tkfont.Font(size=14), 
+                                    fg=COLORS["accent_green"], bg=COLORS["bg_panel"])
+        self._status_dot.pack(side=tk.LEFT, padx=10)
 
-        # Right: Status indicator
-        status_frame = tk.Frame(header, bg=COLORS["bg_panel"])
-        status_frame.pack(side=tk.RIGHT, padx=20, pady=10)
-
-        self._status_dot = tk.Label(
-            status_frame,
-            text="●",
-            font=tkfont.Font(size=14),
-            fg=COLORS["accent_green"],
-            bg=COLORS["bg_panel"],
-        )
-        self._status_dot.pack(side=tk.LEFT, padx=(0, 8))
-
-        self._status_label = tk.Label(
-            status_frame,
-            text="Ready",
-            font=self._font_status,
-            fg=COLORS["accent_green"],
-            bg=COLORS["bg_panel"],
-        )
+        self._status_label = tk.Label(st_frame, text="Online", font=self._font_status, 
+                                      fg=COLORS["accent_green"], bg=COLORS["bg_panel"])
         self._status_label.pack(side=tk.LEFT)
 
-    def _build_main_area(self):
-        """Main content area: chat log (left) + schedule panel (right)."""
-        main = tk.Frame(self.root, bg=COLORS["bg_dark"])
-        main.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 0))
+    def _build_main_body(self):
+        """The core layout containing Chat and Schedule panels."""
+        body = tk.Frame(self.root, bg=COLORS["bg_dark"])
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
 
-        # ── Left: Chat Log ───────────────────────────────────
-        chat_frame = tk.Frame(main, bg=COLORS["bg_chat"], bd=1,
-                              highlightbackground=COLORS["border"],
-                              highlightthickness=1)
-        chat_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        # LEFT COLUMN: Interactive Chat Log
+        log_frame = tk.Frame(body, bg=COLORS["bg_chat"], bd=1, highlightbackground=COLORS["border"], highlightthickness=1)
+        log_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
-        # Chat header
-        chat_header = tk.Frame(chat_frame, bg=COLORS["bg_panel"], height=35)
-        chat_header.pack(fill=tk.X)
-        chat_header.pack_propagate(False)
-        tk.Label(
-            chat_header, text="  CONVERSATION LOG",
-            font=self._font_label, fg=COLORS["text_secondary"],
-            bg=COLORS["bg_panel"],
-        ).pack(side=tk.LEFT, padx=10, pady=5)
+        # Internal scrollable text widget
+        self._chat_display = scrolledtext.ScrolledText(
+            log_frame, wrap=tk.WORD, font=self._font_chat, bg=COLORS["bg_chat"],
+            fg=COLORS["text_primary"], insertbackground=COLORS["text_primary"], 
+            borderwidth=0, padx=20, pady=20, state=tk.DISABLED
+        )
+        self._chat_display.pack(fill=tk.BOTH, expand=True)
 
-        # Scrollable chat area
-        self._chat_text = scrolledtext.ScrolledText(
-            chat_frame,
-            wrap=tk.WORD,
-            font=self._font_chat,
-            bg=COLORS["bg_chat"],
-            fg=COLORS["text_primary"],
-            insertbackground=COLORS["text_primary"],
-            selectbackground=COLORS["accent_blue"],
-            borderwidth=0,
-            highlightthickness=0,
-            padx=15,
-            pady=10,
-            state=tk.DISABLED,
-            cursor="arrow",
-        )
-        self._chat_text.pack(fill=tk.BOTH, expand=True)
+        # Message Styling Tags
+        self._chat_display.tag_configure("jarvis", foreground=COLORS["text_jarvis"], 
+                                         font=tkfont.Font(family=_FONT_MONO, size=11, weight="bold"))
+        self._chat_display.tag_configure("user", foreground=COLORS["text_user"])
+        self._chat_display.tag_configure("system", foreground=COLORS["text_secondary"], slant="italic")
+        self._chat_display.tag_configure("time", foreground=COLORS["text_secondary"], font=self._font_small)
 
-        # Configure chat text tags for colored messages
-        self._chat_text.tag_configure(
-            "jarvis", foreground=COLORS["text_jarvis"],
-            font=tkfont.Font(family=_FONT_MONO, size=11, weight="bold"),
-        )
-        self._chat_text.tag_configure(
-            "user", foreground=COLORS["text_user"],
-            font=tkfont.Font(family=_FONT_MONO, size=11),
-        )
-        self._chat_text.tag_configure(
-            "system", foreground=COLORS["text_secondary"],
-            font=tkfont.Font(family=_FONT_MONO, size=10, slant="italic"),
-        )
-        self._chat_text.tag_configure(
-            "timestamp", foreground=COLORS["text_secondary"],
-            font=tkfont.Font(family=_FONT_MONO, size=9),
-        )
+        # RIGHT COLUMN: Life Management Sidebar
+        side_frame = tk.Frame(body, bg=COLORS["bg_panel"], width=300, bd=1, highlightbackground=COLORS["border"], highlightthickness=1)
+        side_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        side_frame.pack_propagate(False)
 
-        # ── Right: Schedule Panel ────────────────────────────
-        schedule_frame = tk.Frame(main, bg=COLORS["bg_panel"], width=280, bd=1,
-                                  highlightbackground=COLORS["border"],
-                                  highlightthickness=1)
-        schedule_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
-        schedule_frame.pack_propagate(False)
+        # Sidebar Title
+        tk.Label(side_frame, text="   AGENDA OVERVIEW", font=self._font_small, 
+                 fg=COLORS["text_secondary"], bg=COLORS["bg_panel"], pady=10).pack(anchor="w")
 
-        # Schedule header
-        sched_header = tk.Frame(schedule_frame, bg=COLORS["bg_panel"], height=35)
-        sched_header.pack(fill=tk.X)
-        sched_header.pack_propagate(False)
-        tk.Label(
-            sched_header, text="  WEEKLY SCHEDULE",
-            font=self._font_label, fg=COLORS["text_secondary"],
-            bg=COLORS["bg_panel"],
-        ).pack(side=tk.LEFT, padx=10, pady=5)
+        self._agenda_view = tk.Text(
+            side_frame, wrap=tk.WORD, font=self._font_schedule, bg=COLORS["bg_panel"],
+            fg=COLORS["text_primary"], borderwidth=0, padx=15, state=tk.DISABLED
+        )
+        self._agenda_view.pack(fill=tk.BOTH, expand=True)
 
-        # Schedule content
-        self._schedule_text = tk.Text(
-            schedule_frame,
-            wrap=tk.WORD,
-            font=self._font_schedule,
-            bg=COLORS["bg_panel"],
-            fg=COLORS["text_primary"],
-            borderwidth=0,
-            highlightthickness=0,
-            padx=12,
-            pady=8,
-            state=tk.DISABLED,
-            cursor="arrow",
-        )
-        self._schedule_text.pack(fill=tk.BOTH, expand=True)
-
-        self._schedule_text.tag_configure(
-            "day", foreground=COLORS["accent_cyan"],
-            font=tkfont.Font(family=_FONT_SANS, size=10, weight="bold"),
-        )
-        self._schedule_text.tag_configure(
-            "today", foreground=COLORS["accent_yellow"],
-            font=tkfont.Font(family=_FONT_SANS, size=10, weight="bold"),
-        )
-        self._schedule_text.tag_configure(
-            "event", foreground=COLORS["text_primary"],
-        )
-        self._schedule_text.tag_configure(
-            "free", foreground=COLORS["accent_green"],
-        )
-        self._schedule_text.tag_configure(
-            "time", foreground=COLORS["text_secondary"],
-            font=tkfont.Font(family=_FONT_SANS, size=9),
-        )
-
-        # Populate schedule
-        self._refresh_schedule()
+        # Agenda Styling Tags
+        self._agenda_view.tag_configure("day", foreground=COLORS["accent_cyan"], weight="bold")
+        self._agenda_view.tag_configure("today", foreground=COLORS["accent_yellow"], weight="bold")
+        self._agenda_view.tag_configure("time", foreground=COLORS["text_secondary"])
+        self._agenda_view.tag_configure("free", foreground=COLORS["accent_green"])
 
     def _build_footer(self):
-        """Bottom bar with mute button and info."""
-        footer = tk.Frame(self.root, bg=COLORS["bg_panel"], height=50)
-        footer.pack(fill=tk.X, side=tk.BOTTOM, pady=(5, 0))
+        """The bottom control bar for hardware override."""
+        footer = tk.Frame(self.root, bg=COLORS["bg_panel"], height=60)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
         footer.pack_propagate(False)
 
-        # Mute button
-        self._mute_btn = tk.Button(
-            footer,
-            text="🔊 Audio ON",
-            font=self._font_button,
-            bg=COLORS["accent_blue"],
-            fg="#ffffff",
-            activebackground=COLORS["accent_cyan"],
-            activeforeground="#ffffff",
-            borderwidth=0,
-            padx=20,
-            pady=5,
-            cursor="hand2",
-            command=self._toggle_mute,
+        # TOGGLE: Global Audio Mute
+        self._audio_btn = tk.Button(
+            footer, text="🔊  AUDITORY SENSORS: ON", font=self._font_button,
+            bg=COLORS["accent_blue"], fg="white", activebackground=COLORS["accent_cyan"],
+            activeforeground="white", borderwidth=0, padx=25, cursor="hand2", 
+            command=self._handle_mute_toggle
         )
-        self._mute_btn.pack(side=tk.LEFT, padx=20, pady=8)
+        self._audio_btn.pack(side=tk.LEFT, padx=30, pady=10)
 
-        # Info label — show active provider dynamically
+        # METADATA: Dynamic Provider Information
         try:
             from config import LLM_PROVIDER, PROVIDER_NAMES
-            provider_name = PROVIDER_NAMES.get(LLM_PROVIDER, LLM_PROVIDER)
-        except Exception:
-            provider_name = "LLM"
+            pname = PROVIDER_NAMES.get(LLM_PROVIDER, "Core Logic")
+        except: pname = "AI Processor"
 
-        tk.Label(
-            footer,
-            text=f'Say "exit" or "goodbye" to stop  |  {provider_name} + Murf Falcon TTS',
-            font=self._font_label,
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_panel"],
-        ).pack(side=tk.RIGHT, padx=20, pady=8)
+        tk.Label(footer, text=f"Active Brain: {pname}  |  Vocal Engine: Murf Falcon", 
+                 font=self._font_small, fg=COLORS["text_secondary"], bg=COLORS["bg_panel"]).pack(side=tk.RIGHT, padx=30)
 
-    # ═══════════════════════════════════════════════════════════
-    # UI UPDATE METHODS (thread-safe via root.after)
-    # ═══════════════════════════════════════════════════════════
+    # --------------------------------------------------------------------------
+    # DATA BINDING & REACTION
+    # --------------------------------------------------------------------------
 
-    def update_status(self, status: str) -> None:
-        """Thread-safe status update."""
-        def _update():
-            color = STATUS_COLORS.get(status, COLORS["text_primary"])
-            self._status_label.configure(text=status, fg=color)
-            self._status_dot.configure(fg=color)
-        self.root.after(0, _update)
+    def update_status(self, raw_status: str) -> None:
+        """Invoked by the background thread to update UI state."""
+        def _apply():
+            # Match status to theme color palette
+            mapped_color = STATUS_MAP.get(raw_status, COLORS["text_primary"])
+            self._status_label.configure(text=raw_status, fg=mapped_color)
+            self._status_dot.configure(fg=mapped_color)
+        self.root.after(0, _apply)
 
-    def add_message(self, role: str, text: str) -> None:
-        """
-        Thread-safe: adds a message to the chat log.
-
-        Args:
-            role: "user", "jarvis", or "system"
-            text: The message text.
-        """
-        def _update():
-            self._chat_text.configure(state=tk.NORMAL)
-
+    def add_chat_message(self, role: str, message: str) -> None:
+        """Pushes a new record into the conversation history log."""
+        def _apply():
+            self._chat_display.configure(state=tk.NORMAL)
             timestamp = datetime.now().strftime("%I:%M %p")
+            
+            # Header
+            header = f"\n[{timestamp}] {'BRO' if role == 'user' else 'JARVIS'}:\n"
+            style = "user" if role == "user" else "jarvis"
+            
+            self._chat_display.insert(tk.END, header, "time")
+            self._chat_display.insert(tk.END, f"  {message}\n", style)
+            
+            self._chat_display.configure(state=tk.DISABLED)
+            self._chat_display.see(tk.END) # Auto-scroll
+        self.root.after(0, _apply)
 
-            if role == "user":
-                prefix = f"\n[{timestamp}]  You:\n"
-                self._chat_text.insert(tk.END, prefix, "timestamp")
-                self._chat_text.insert(tk.END, f"  {text}\n", "user")
-            elif role == "jarvis":
-                prefix = f"\n[{timestamp}]  JARVIS:\n"
-                self._chat_text.insert(tk.END, prefix, "timestamp")
-                self._chat_text.insert(tk.END, f"  {text}\n", "jarvis")
-            else:
-                self._chat_text.insert(tk.END, f"\n  {text}\n", "system")
+    def _refresh_agenda(self):
+        """Pulls fresh data from the schedule/reminder modules."""
+        self._agenda_view.configure(state=tk.NORMAL)
+        self._agenda_view.delete("1.0", tk.END)
 
-            self._chat_text.configure(state=tk.DISABLED)
-            self._chat_text.see(tk.END)
+        # Current Context
+        today_name = datetime.now().strftime("%A")
+        schedule_data = get_schedule()
+        
+        # Rendering Logic
+        current_header = ""
+        for item in schedule_data:
+            if item["day"] != current_header:
+                current_header = item["day"]
+                # Visual Highlight if it's the current real-world day
+                tag = "today" if current_header == today_name else "day"
+                self._agenda_view.insert(tk.END, f"\n{current_header.upper()}\n", tag)
+            
+            self._agenda_view.insert(tk.END, f"  {item['time']:>8}  ", "time")
+            status_tag = "free" if item["event"].lower() == "free" else ""
+            self._agenda_view.insert(tk.END, f"{item['event']}\n", status_tag)
 
-        self.root.after(0, _update)
+        # Persisted Reminders Check
+        from data.reminders import get_reminders
+        rems = get_reminders()
+        if rems:
+            self._agenda_view.insert(tk.END, "\n\nACTIVE REMINDERS\n", "today")
+            for r in rems:
+                self._agenda_view.insert(tk.END, f"  {r['time']:>8}  ", "time")
+                self._agenda_view.insert(tk.END, f"{r['task']}\n")
 
-    def _refresh_schedule(self) -> None:
-        """Refreshes the schedule panel with current data. Highlights today."""
-        self._schedule_text.configure(state=tk.NORMAL)
-        self._schedule_text.delete("1.0", tk.END)
+        self._agenda_view.configure(state=tk.DISABLED)
 
-        schedule = get_schedule()
-        today = datetime.now().strftime("%A")  # "Monday", "Tuesday" etc.
+    def _auto_refresh_loop(self):
+        """Infinite polling loop for data updates (30s interval)."""
+        self._refresh_agenda()
+        self.root.after(30000, self._auto_refresh_loop)
 
-        # Sort by day order
-        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday",
-                     "Friday", "Saturday", "Sunday"]
-        schedule_sorted = sorted(schedule, key=lambda x: (
-            day_order.index(x["day"]) if x["day"] in day_order else 7
-        ))
-
-        current_day = ""
-        for entry in schedule_sorted:
-            if entry["day"] != current_day:
-                current_day = entry["day"]
-                # Highlight today's day header in yellow
-                day_tag = "today" if current_day == today else "day"
-                self._schedule_text.insert(tk.END, f"\n{current_day}\n", day_tag)
-
-            time_str = f"  {entry['time']:>8}  "
-            self._schedule_text.insert(tk.END, time_str, "time")
-
-            tag = "free" if entry["event"].lower() == "free" else "event"
-            self._schedule_text.insert(tk.END, f"{entry['event']}\n", tag)
-
-        # Show reminders if any
-        reminders = get_reminders()
-        if reminders:
-            self._schedule_text.insert(tk.END, "\n\nREMINDERS\n", "today")
-            for r in reminders:
-                self._schedule_text.insert(tk.END,
-                    f"  {r['time']:>8}  ", "time")
-                self._schedule_text.insert(tk.END,
-                    f"{r['task']} ({r['date']})\n", "event")
-
-        self._schedule_text.configure(state=tk.DISABLED)
-
-    def _auto_refresh_schedule(self) -> None:
-        """Auto-refreshes the schedule panel every 30 seconds."""
-        self._refresh_schedule()
-        self.root.after(30000, self._auto_refresh_schedule)
-
-    def _toggle_mute(self) -> None:
-        """Toggles audio mute/unmute. Single source of truth in tts.py."""
-        muted = not is_muted()
-        set_muted(muted)
-
-        if muted:
-            self._mute_btn.configure(
-                text="MUTED",
-                bg=COLORS["accent_red"],
-            )
+    def _handle_mute_toggle(self):
+        """Synchronizes the UI button state with the core audio logic."""
+        new_mute_state = not is_muted()
+        set_muted(new_mute_state)
+        
+        if new_mute_state:
+            self._audio_btn.configure(text="🔇  AUDITORY SENSORS: OFF", bg=COLORS["accent_red"])
         else:
-            self._mute_btn.configure(
-                text="Audio ON",
-                bg=COLORS["accent_blue"],
-            )
+            self._audio_btn.configure(text="🔊  AUDITORY SENSORS: ON", bg=COLORS["accent_blue"])
 
-    def _on_close(self) -> None:
-        """Handle window close cleanly without hanging."""
-        if self._agent:
-            self._agent.stop()
-        # Small delay so the agent thread can exit the blocking listen() call
+    def _on_close(self):
+        """Safe termination sequence."""
+        if self._agent: self._agent.stop()
         self.root.after(200, self.root.destroy)
 
-    # ═══════════════════════════════════════════════════════════
-    # AGENT INTEGRATION
-    # ═══════════════════════════════════════════════════════════
-
-    def start_agent(self) -> None:
-        """
-        Creates and starts the JARVIS agent in a background thread.
-        The agent uses this GUI's update methods as callbacks.
-        """
+    def _bootstrap_agent(self):
+        """Spawns the computational thread."""
         from core.agent import JarvisAgent
-
-        self._agent = JarvisAgent(
-            status_callback=self.update_status,
-            message_callback=self.add_message,
-        )
-
-        self._agent_thread = threading.Thread(
-            target=self._agent.run,
-            daemon=True,
-            name="JarvisAgentThread",
-        )
+        self._agent = JarvisAgent(status_callback=self.update_status, message_callback=self.add_chat_message)
+        
+        self._agent_thread = threading.Thread(target=self._agent.run, daemon=True)
         self._agent_thread.start()
+        self.add_chat_message("system", "Neural Infrastructure Initialized. Agent Online.")
 
-        # Add system message to chat
-        self.add_message("system",
-                         "JARVIS initializing... Agent thread started.")
-
-    def run(self) -> None:
-        """
-        Starts the GUI mainloop. This is BLOCKING.
-        Call start_agent() before or after this as needed.
-        """
-        # Start agent in background after a short delay
-        # (gives the GUI time to render first)
-        self.root.after(500, self.start_agent)
+    def run(self):
+        """Launches the window. This is the application's blocking finish line."""
+        self.root.after(800, self._bootstrap_agent) # Slight delay for smooth visual entry
         self.root.mainloop()
 
 
-# ── Self-test / Standalone ───────────────────────────────────
 if __name__ == "__main__":
-    print("[GUI] Starting JARVIS GUI in standalone mode...")
     gui = JarvisGUI()
     gui.run()

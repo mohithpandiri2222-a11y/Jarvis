@@ -1,11 +1,19 @@
-# ============================================================
-# JARVIS — Agent Module (core/agent.py)
-# ============================================================
-# The main synchronous execution loop that connects:
-#   STT (listen) → LLM (think) → TTS (speak) → repeat
-#
-# This is the brain of the operation.
-# ============================================================
+"""
+================================================================================
+JARVIS — Agent Lifecycle Module (core/agent.py)
+================================================================================
+The Conscious Core: Control Loop & Orchestration
+
+This module defines the JarvisAgent class, which ties together the three 
+core pillars of the assistant:
+1. HEARING (STT)      : Capturing what the user says.
+2. THINKING (LLM)     : Deciding how to respond.
+3. SPEAKING (TTS)     : Communicating the result.
+
+The agent maintains conversational state and ensures tasks are executed 
+in the correct order (Synchronous Voice Pipeline).
+================================================================================
+"""
 
 import sys
 from pathlib import Path
@@ -15,60 +23,54 @@ from core.stt import listen, test_microphone
 from core.llm import get_response
 from core.tts import speak, speak_startup_greeting, get_tts_status
 
-# ── Exit keywords ────────────────────────────────────────────
-EXIT_KEYWORDS = {"exit", "quit", "shutdown", "goodbye", "bye", "stop",
-                 "shut down", "good bye", "bye bye", "turn off"}
+# ------------------------------------------------------------------------------
+# EXIT SEQUENCE CONFIGURATION
+# ------------------------------------------------------------------------------
+# Keywords that trigger a graceful shutdown of the background agent thread.
+EXIT_KEYWORDS = {
+    "exit", "quit", "shutdown", "goodbye", "bye", "stop",
+    "shut down", "good bye", "bye bye", "turn off", "deactivate"
+}
 
 
 def _is_exit_command(text: str) -> bool:
-    """Check if the user wants to exit."""
+    """Simple heuristic to detect intent to close."""
     return text.lower().strip() in EXIT_KEYWORDS
 
 
 class JarvisAgent:
     """
-    The JARVIS Agent — orchestrates the full voice pipeline.
-
-    Usage:
-        agent = JarvisAgent()
-        agent.run()  # Blocking loop
-
-    Or with GUI callbacks:
-        agent = JarvisAgent(
-            status_callback=update_status_label,
-            message_callback=add_chat_message
-        )
-        agent.run()
+    The Orchestrator. 
+    Maintains the state of the session and bridge communication between 
+    the Voice logic and the GUI/Terminal view.
     """
 
     def __init__(self, status_callback=None, message_callback=None):
         """
+        Initializes the agent with optional UI hooks.
+        
         Args:
-            status_callback: Optional function(status_str) called when
-                             the agent's state changes. Used by the GUI
-                             to update the status label.
-
-            message_callback: Optional function(role_str, text_str) called
-                              when a message is added to the conversation.
-                              role is "user" or "jarvis". Used by the GUI
-                              to update the chat log.
+            status_callback: Called when state changes (e.g., 'Thinking')
+            message_callback: Called when a new message needs to be logged in chat.
         """
         self._status_callback = status_callback
         self._message_callback = message_callback
+        
+        # Internal memory for the current session's chat history
         self._conversation_history = []
         self._running = False
 
     def _update_status(self, status: str) -> None:
-        """Update status via callback and print to console."""
-        print(f"[JARVIS] Status: {status}")
+        """Internal helper to notify the UI of current processor state."""
+        print(f"[STATE] {status}")
         if self._status_callback:
             try:
                 self._status_callback(status)
             except Exception:
-                pass  # Don't crash the agent if callback fails
+                pass # UI failures should not kill the brain
 
     def _add_message(self, role: str, text: str) -> None:
-        """Add a message to the GUI chat log."""
+        """Internal helper to append messages to the visual log."""
         if self._message_callback:
             try:
                 self._message_callback(role, text)
@@ -76,65 +78,58 @@ class JarvisAgent:
                 pass
 
     def stop(self) -> None:
-        """Signal the agent to stop after the current iteration."""
+        """Instruction to terminate the main loop after current task finish."""
         self._running = False
 
     def run(self) -> None:
         """
-        Main execution loop. This is BLOCKING and runs forever
-        until the user says an exit keyword or stop() is called.
-
-        The loop follows the strict synchronous pipeline:
-          1. Listen (blocks until speech detected)
-          2. Send to GPT-4o (blocks until response)
-          3. Speak response (blocks until audio finishes)
-          4. Repeat
+        The Main Cognitive Loop. 
+        Synchronous and infinite until stopped.
+        
+        Pipeline Architecture:
+        1. Listen (Blocks until silence)
+        2. Think  (Blocks until API response)
+        3. Speak  (Blocks until audio finished)
         """
         self._running = True
 
-        print()
-        print("=" * 60)
-        print("    J.A.R.V.I.S. -- ONLINE")
-        print("    Just A Rather Very Intelligent System")
-        print("=" * 60)
-        print()
+        print("\n" + "=" * 60)
+        print("  JARVIS INFRASTRUCTURE — OPERATIONAL")
+        print("=" * 60 + "\n")
 
-        # -- Print TTS engine status so user knows what voice they'll hear
+        # Log system status (TTS engine, etc.)
         print(get_tts_status())
         print()
 
-        # ── Startup Greeting ─────────────────────────────────
-        self._update_status("Starting up...")
+        # 1. INITIALIZATION GREETING
+        self._update_status("Calibrating Core...")
         speak_startup_greeting(self._status_callback)
-        self._add_message("jarvis",
-                          "Good to have you back, Bro. All systems are online. "
-                          "What do we need today?")
+        self._add_message("jarvis", "All systems online. Ready to assist, Bro.")
 
-        # ── Main Loop ────────────────────────────────────────
+        # 2. THE SENSORY LOOP
         while self._running:
             try:
-                # STEP 1: Listen for user speech
-                self._update_status("Listening...")
+                # -- PHASE 1: Perception (Listen) --
+                self._update_status("Awaiting Command...")
                 user_text = listen(self._status_callback)
 
-                # No speech detected — loop back
+                # Ignore empty captures (ambient noise glitches)
                 if not user_text:
                     continue
 
-                # Check for exit command
+                # Check for termination intent
                 if _is_exit_command(user_text):
-                    self._update_status("Shutting down...")
-                    shutdown_msg = "Shutting down. Good day, Bro."
-                    print(f"\n💬 Jarvis: {shutdown_msg}")
+                    self._update_status("Deactivating...")
+                    shutdown_msg = "Powering down. Good day, Bro."
                     self._add_message("user", user_text)
                     self._add_message("jarvis", shutdown_msg)
                     speak(shutdown_msg, self._status_callback)
                     break
 
-                # Log the user message
+                # -- PHASE 2: Cognition (Think) --
+                # Update visual log immediately
                 self._add_message("user", user_text)
-
-                # STEP 2: Send to GPT-4o and get response
+                
                 self._update_status("Thinking...")
                 response_text, self._conversation_history = get_response(
                     user_text,
@@ -142,66 +137,59 @@ class JarvisAgent:
                     self._status_callback,
                 )
 
-                # Log the Jarvis response
-                print(f"\n💬 Jarvis: {response_text}")
+                # -- PHASE 3: Projection (Speak) --
                 self._add_message("jarvis", response_text)
-
-                # STEP 3: Speak the response (BLOCKING)
-                self._update_status("Speaking...")
+                self._update_status("Projecting Voice...")
                 speak(response_text, self._status_callback)
 
-                # STEP 4: Ready for next input
-                self._update_status("Ready")
+                # Reset state for next interaction
+                self._update_status("Online")
 
             except KeyboardInterrupt:
-                print("\n\n[JARVIS] Interrupted by user. Shutting down...")
-                self._update_status("Shutting down...")
-                speak("Interrupted. Shutting down, Bro.", self._status_callback)
+                print("\n[SYSTEM] Manual interrupt signal received.")
                 break
 
-            except OSError as e:
-                # Microphone error — cannot continue
-                print(f"\n[JARVIS] Critical error: {e}")
-                self._update_status("Error: Microphone")
-                print("[JARVIS] Cannot access microphone. Exiting.")
+            except OSError as mic_err:
+                # Critical hardware failure
+                print(f"[FATAL] Audio sensory loss: {mic_err}")
+                self._update_status("HARDWARE ERROR")
                 break
 
             except Exception as e:
-                # Non-critical error -- speak feedback and continue
-                print(f"\n[JARVIS] Error in main loop: {e}")
-                self._update_status("Error -- recovering...")
-                import traceback
-                traceback.print_exc()
-                # Tell the user something went wrong instead of going silent
+                # Non-critical logic error (likely API timeout or JSON parse fail)
+                print(f"[RECOVER] Logical fault in loop: {e}")
+                self._update_status("Error Recovery...")
+                # Feedback to user so they don't think Jarvis is dead
                 try:
-                    speak("I ran into a small issue Bro, give me a moment.",
-                          self._status_callback)
-                except Exception:
-                    pass  # If even speak fails, just continue
+                    speak("Minor cognitive hitch Bro, I'm recalculating.", self._status_callback)
+                except:
+                    pass
                 continue
 
+        # Shutdown sequence
         self._running = False
         self._update_status("Offline")
-        print("\n[JARVIS] Agent stopped. Goodbye.")
+        print("\n[JARVIS] Agent decommissioned. Goodbye.")
 
 
 def run_terminal_mode() -> None:
     """
-    Runs the JARVIS agent in terminal-only mode (no GUI).
+    Simplistic runner for CLI-only environments.
+    No GUI requirements, just pure voice pipeline.
     """
-    print("[JARVIS] Starting in terminal mode...")
-    print("[JARVIS] Say 'exit', 'quit', or 'goodbye' to stop.\n")
+    print("[INIT] Booting Jarvis (CLI/Headless Mode)...")
 
-    # Quick microphone check
+    # Final hardware sanity check before entering the loop
     if not test_microphone():
-        print("\n[JARVIS] ERROR: Microphone not available.")
-        print("[JARVIS] Fix microphone issues and try again.")
+        print("[INIT] Error: Microphone hardware not responsive. Terminating.")
         sys.exit(1)
 
     agent = JarvisAgent()
     agent.run()
 
 
-# ── Self-test ────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
+# ENTRY POINT
+# ------------------------------------------------------------------------------
 if __name__ == "__main__":
     run_terminal_mode()
